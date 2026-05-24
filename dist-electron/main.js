@@ -35,6 +35,7 @@ function initializeSchema() {
       bank_file_name TEXT NOT NULL,
       erp_file_name TEXT NOT NULL,
       rules_id TEXT,
+      rules_json TEXT,
       matched_pairs_json TEXT,
       unmatched_bank_json TEXT,
       unmatched_erp_json TEXT,
@@ -68,6 +69,10 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS idx_rules_name ON rules(name);
     CREATE INDEX IF NOT EXISTS idx_history_session_id ON history(session_id);
   `);
+  const sessionColumns = database.prepare("PRAGMA table_info(sessions)").all().map((col) => col.name);
+  if (!sessionColumns.includes("rules_json")) {
+    database.exec("ALTER TABLE sessions ADD COLUMN rules_json TEXT");
+  }
 }
 function saveRule(mappingRules, name, description) {
   const database = getDatabase();
@@ -144,25 +149,28 @@ function saveSession(sessionData) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const stmt = database.prepare(`
     INSERT INTO sessions (
-      id, name, bank_file_name, erp_file_name, rules_id,
+      id, name, bank_file_name, erp_file_name, rules_id, rules_json,
       matched_pairs_json, unmatched_bank_json, unmatched_erp_json,
       match_percentage, is_active, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const matchedPairsJson = sessionData.matchedPairs ? JSON.stringify(sessionData.matchedPairs) : null;
   const unmatchedBankJson = sessionData.unmatchedBank ? JSON.stringify(sessionData.unmatchedBank) : null;
   const unmatchedErpJson = sessionData.unmatchedERP ? JSON.stringify(sessionData.unmatchedERP) : null;
+  const isActive = sessionData.isActive !== void 0 ? sessionData.isActive ? 1 : 0 : 1;
+  const rulesJson = sessionData.rules ? JSON.stringify(sessionData.rules) : null;
   stmt.run(
     id,
     sessionData.name || null,
     sessionData.bankFileName || "",
     sessionData.erpFileName || "",
     null,
+    rulesJson,
     matchedPairsJson,
     unmatchedBankJson,
     unmatchedErpJson,
     sessionData.matchPercentage || 0,
-    1,
+    isActive,
     now,
     now
   );
@@ -174,6 +182,7 @@ function updateSession(sessionId, updates) {
   const matchedPairsJson = updates.matchedPairs ? JSON.stringify(updates.matchedPairs) : void 0;
   const unmatchedBankJson = updates.unmatchedBank ? JSON.stringify(updates.unmatchedBank) : void 0;
   const unmatchedErpJson = updates.unmatchedERP ? JSON.stringify(updates.unmatchedERP) : void 0;
+  const rulesJson = updates.rules ? JSON.stringify(updates.rules) : void 0;
   const setParts = [];
   const params = [];
   if (updates.name !== void 0) {
@@ -191,6 +200,10 @@ function updateSession(sessionId, updates) {
   if (unmatchedErpJson !== void 0) {
     setParts.push("unmatched_erp_json = ?");
     params.push(unmatchedErpJson);
+  }
+  if (rulesJson !== void 0) {
+    setParts.push("rules_json = ?");
+    params.push(rulesJson);
   }
   if (updates.matchPercentage !== void 0) {
     setParts.push("match_percentage = ?");
