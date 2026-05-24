@@ -3,6 +3,9 @@ export interface MappingRule {
   bankColumn: string;
   erpColumn: string;
   comparisonMode?: 'numeric' | 'text';
+  operator?: 'equals' | 'less-than' | 'greater-than' | 'less-than-or-equal' | 'greater-than-or-equal' | 'contains';
+  customValue1?: string;
+  customValue2?: string;
 }
 
 export type TransactionRow = Record<string, string | number | undefined>;

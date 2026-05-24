@@ -35,7 +35,7 @@ export const MappingScreen = () => {
   const [bankColumns, setBankColumns] = useState<string[]>([]);
   const [erpColumns, setErpColumns] = useState<string[]>([]);
   const [rules, setRules] = useState<MappingRule[]>([
-    { id: 'date-rule-init', bankColumn: '', erpColumn: '', comparisonMode: 'text' },
+    { id: 'date-rule-init', bankColumn: '', erpColumn: '', comparisonMode: 'text', operator: 'equals' },
   ]);
   
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -43,6 +43,7 @@ export const MappingScreen = () => {
   const [templateDescription, setTemplateDescription] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState<{ show: boolean; msg: string; type: 'error' | 'success' }>({ show: false, msg: '', type: 'error' });
+  const [expandedRules, setExpandedRules] = useState<string[]>([]);
 
   useEffect(() => {
     if (!parsedData) {
@@ -59,7 +60,13 @@ export const MappingScreen = () => {
   }, [parsedData, navigate]);
 
   const addRule = () => {
-    setRules([...rules, { id: crypto.randomUUID(), bankColumn: '', erpColumn: '', comparisonMode: 'text' }]);
+    setRules([...rules, { id: crypto.randomUUID(), bankColumn: '', erpColumn: '', comparisonMode: 'text', operator: 'equals' }]);
+  };
+
+  const toggleExpanded = (id: string) => {
+    setExpandedRules(prev => 
+      prev.includes(id) ? prev.filter(r => r !== id) : [...prev, id]
+    );
   };
 
   const removeRule = (id: string) => {
@@ -195,54 +202,95 @@ export const MappingScreen = () => {
                 key={rule.id}
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="grid grid-cols-[1fr_auto_1fr_minmax(120px,auto)_auto] items-center gap-4 p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-purple-300 transition-colors"
+                className="flex flex-col gap-4 p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-purple-300 transition-colors"
               >
-                <select 
-                  value={rule.bankColumn}
-                  onChange={(e) => updateRule(rule.id, 'bankColumn', e.target.value)}
-                  className="w-full bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl px-4 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900"
-                >
-                  <option value="" >Select Bank Column...</option>
-                  {bankColumns.map(col => (
-                    <option key={`bank-${col}`} value={col}>{col}</option>
-                  ))}
-                </select>
+                <div className="grid grid-cols-[1fr_auto_1fr_minmax(120px,auto)_auto] items-center gap-4 w-full">
+                  <select 
+                    value={rule.bankColumn}
+                    onChange={(e) => updateRule(rule.id, 'bankColumn', e.target.value)}
+                    className="w-full bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl px-4 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900"
+                  >
+                    <option value="" >Select Bank Column...</option>
+                    {bankColumns.map(col => (
+                      <option key={`bank-${col}`} value={col}>{col}</option>
+                    ))}
+                  </select>
 
-                <div className="flex font-mono text-xs text-slate-400 bg-white dark:bg-slate-800 px-3 py-1 rounded-full shadow-sm border border-slate-200 dark:border-slate-700">
-                  MUST EQUAL
+                  <select
+                    value={rule.operator || 'equals'}
+                    onChange={(e) => updateRule(rule.id, 'operator', e.target.value)}
+                    className="w-40 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900 text-sm font-semibold"
+                  >
+                    <option value="equals">Equals</option>
+                    <option value="contains">Contains</option>
+                    <option value="less-than">Less Than</option>
+                    <option value="greater-than">Greater Than</option>
+                    <option value="less-than-or-equal">Less Than or Eq</option>
+                    <option value="greater-than-or-equal">Greater Than or Eq</option>
+                  </select>
+
+                  <select 
+                    value={rule.erpColumn}
+                    onChange={(e) => updateRule(rule.id, 'erpColumn', e.target.value)}
+                    className="w-full bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl px-4 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900"
+                  >
+                    <option value="">Select ERP Column...</option>
+                    {erpColumns.map(col => (
+                      <option key={`erp-${col}`} value={col}>{col}</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={rule.comparisonMode || 'text'}
+                    onChange={(e) => updateRule(rule.id, 'comparisonMode', e.target.value)}
+                    className="w-full bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900 text-sm"
+                  >
+                    <option value="text">Text (Exact)</option>
+                    <option value="numeric">Numeric</option>
+                  </select>
+
+                  <button 
+                    onClick={() => removeRule(rule.id)}
+                    disabled={rules.length === 1}
+                    className={`p-3 rounded-xl transition-colors ${
+                      rules.length === 1 
+                        ? 'text-slate-300 cursor-not-allowed dark:text-slate-700' 
+                        : 'text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10'
+                    }`}
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
                 </div>
 
-                <select 
-                  value={rule.erpColumn}
-                  onChange={(e) => updateRule(rule.id, 'erpColumn', e.target.value)}
-                  className="w-full bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl px-4 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900"
-                >
-                  <option value="">Select ERP Column...</option>
-                  {erpColumns.map(col => (
-                    <option key={`erp-${col}`} value={col}>{col}</option>
-                  ))}
-                </select>
-
-                <select
-                  value={rule.comparisonMode || 'text'}
-                  onChange={(e) => updateRule(rule.id, 'comparisonMode', e.target.value)}
-                  className="w-full bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900 text-sm"
-                >
-                  <option value="text">Text (Exact)</option>
-                  <option value="numeric">Numeric</option>
-                </select>
-
-                <button 
-                  onClick={() => removeRule(rule.id)}
-                  disabled={rules.length === 1}
-                  className={`p-3 rounded-xl transition-colors ${
-                    rules.length === 1 
-                      ? 'text-slate-300 cursor-not-allowed dark:text-slate-700' 
-                      : 'text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10'
-                  }`}
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
+                {rule.comparisonMode === 'numeric' && rule.operator !== 'equals' && (
+                  <div className="pl-4 border-l-2 border-purple-200 dark:border-purple-900/50 mt-2">
+                    <button 
+                      onClick={() => toggleExpanded(rule.id)}
+                      className="text-sm font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 transition-colors flex items-center mb-1"
+                    >
+                      {expandedRules.includes(rule.id) ? '▼ Hide Custom Range' : '▶ Set Custom Range / Limits'}
+                    </button>
+                    
+                    {expandedRules.includes(rule.id) && (
+                      <div className="flex items-center gap-4 mt-3">
+                        <input 
+                          type="number" 
+                          placeholder="Min Value" 
+                          value={rule.customValue1 || ''}
+                          onChange={(e) => updateRule(rule.id, 'customValue1', e.target.value)}
+                          className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-2 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900 text-sm w-32"
+                        />
+                        <input 
+                          type="number" 
+                          placeholder="Max Value" 
+                          value={rule.customValue2 || ''}
+                          onChange={(e) => updateRule(rule.id, 'customValue2', e.target.value)}
+                          className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-2 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900 text-sm w-32"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </motion.div>
             ))}
           </div>

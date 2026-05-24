@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ReconciliationState, ReconciliationResults, TransactionRow } from '../types';
-import { getRowSignature } from '../utils/reconcile';
+import { getRowSignature, splitRules, evaluateMatch } from '../utils/reconcile';
 
 export const useReconciliation = (state: ReconciliationState | null) => {
   const [isProcessing, setIsProcessing] = useState(true);
@@ -17,23 +17,29 @@ export const useReconciliation = (state: ReconciliationState | null) => {
     const bankItems = [...state.parsedData.bankData];
     const erpItems = [...state.parsedData.erpData];
     
-    // ========== Phase 1: Duplicate Detection ==========
+    const { exactRules, fuzzyRules } = splitRules(state.rules);
+
+    // ========== Phase 1: Duplicate Detection (Exact Rules Only) ==========
     const bankSignatures = new Map<string, number>();
     let bankDuplicatesCount = 0;
-    for (const row of bankItems) {
-      const sig = getRowSignature(row, state.rules, 'bank');
-      const count = bankSignatures.get(sig) || 0;
-      if (count >= 1) bankDuplicatesCount++;
-      bankSignatures.set(sig, count + 1);
+    if (exactRules.length > 0) {
+      for (const row of bankItems) {
+        const sig = getRowSignature(row, exactRules, 'bank');
+        const count = bankSignatures.get(sig) || 0;
+        if (count >= 1) bankDuplicatesCount++;
+        bankSignatures.set(sig, count + 1);
+      }
     }
 
     const erpSignatures = new Map<string, number>();
     let erpDuplicatesCount = 0;
-    for (const row of erpItems) {
-      const sig = getRowSignature(row, state.rules, 'erp');
-      const count = erpSignatures.get(sig) || 0;
-      if (count >= 1) erpDuplicatesCount++;
-      erpSignatures.set(sig, count + 1);
+    if (exactRules.length > 0) {
+      for (const row of erpItems) {
+        const sig = getRowSignature(row, exactRules, 'erp');
+        const count = erpSignatures.get(sig) || 0;
+        if (count >= 1) erpDuplicatesCount++;
+        erpSignatures.set(sig, count + 1);
+      }
     }
 
     const warnings: { type: 'bank' | 'erp', count: number }[] = [];
@@ -49,40 +55,55 @@ export const useReconciliation = (state: ReconciliationState | null) => {
        return;
     }
 
-    // ========== Phase 2: Build ERP Lookup Map (O(m)) ==========
-    // Group ERP rows by their signature for O(1) lookup during matching.
-    // Each signature maps to an array of rows to handle duplicates correctly —
-    // when a bank row matches, we consume (shift) one ERP row from that bucket.
+    // ========== Phase 2: Build ERP Lookup Map ==========
     const erpBuckets = new Map<string, TransactionRow[]>();
+    // If we have exact rules, build buckets by exact signature.
+    // If NO exact rules exist, we put everything into a single bucket under `""`.
     for (const row of erpItems) {
-      const sig = getRowSignature(row, state.rules, 'erp');
+      const sig = exactRules.length > 0 ? getRowSignature(row, exactRules, 'erp') : "";
       if (!erpBuckets.has(sig)) {
         erpBuckets.set(sig, []);
       }
       erpBuckets.get(sig)!.push(row);
     }
 
-    // ========== Phase 3: Match Bank Rows via Map Lookup (O(n)) ==========
+    // ========== Phase 3: Match Bank Rows ==========
     const matchedItems: ReconciliationResults['matched'] = [];
     const unmatchedBankItems: ReconciliationResults['unmatchedBank'] = [];
 
     let currentIndex = 0;
 
     const processChunk = () => {
-      const chunkSize = 200; // Larger chunks are fine now — no inner loop
+      const chunkSize = 200;
       const end = Math.min(currentIndex + chunkSize, totalRecords);
 
       for (let i = currentIndex; i < end; i++) {
         const bankRow = bankItems[i];
-        const sig = getRowSignature(bankRow, state.rules, 'bank');
+        const sig = exactRules.length > 0 ? getRowSignature(bankRow, exactRules, 'bank') : "";
         const bucket = erpBuckets.get(sig);
 
+        let matchedIndex = -1;
+
         if (bucket && bucket.length > 0) {
-          // O(1) match: consume first available ERP row from this signature bucket
-          const erpRow = bucket.shift()!;
+          if (fuzzyRules.length === 0) {
+            // No fuzzy rules, so exact match is sufficient
+            matchedIndex = 0;
+          } else {
+            // We have fuzzy rules, we need to find the first ERP row in the bucket that satisfies them
+            for (let j = 0; j < bucket.length; j++) {
+              if (evaluateMatch(bankRow, bucket[j], fuzzyRules)) {
+                matchedIndex = j;
+                break;
+              }
+            }
+          }
+        }
+
+        if (matchedIndex !== -1 && bucket) {
+          // Remove the matched ERP row from the bucket and record it
+          const erpRow = bucket.splice(matchedIndex, 1)[0];
           matchedItems.push({ bank: bankRow, erp: erpRow });
 
-          // Clean up empty buckets
           if (bucket.length === 0) {
             erpBuckets.delete(sig);
           }
@@ -103,7 +124,6 @@ export const useReconciliation = (state: ReconciliationState | null) => {
         setTimeout(() => {
           if (!isMounted) return;
 
-          // Collect remaining unmatched ERP rows from all non-empty buckets
           const unmatchedERPItems: TransactionRow[] = [];
           for (const bucket of erpBuckets.values()) {
             unmatchedERPItems.push(...bucket);
@@ -130,3 +150,4 @@ export const useReconciliation = (state: ReconciliationState | null) => {
 
   return { isProcessing, processingProgress, results, duplicateWarnings };
 };
+

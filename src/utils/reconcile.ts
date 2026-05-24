@@ -37,8 +37,23 @@ export const getRowSignature = (
   return signature;
 };
 
+export const splitRules = (rules: MappingRule[]) => {
+  const exactRules: MappingRule[] = [];
+  const fuzzyRules: MappingRule[] = [];
+  for (const rule of rules) {
+    const isNumericFuzzy = rule.comparisonMode === 'numeric' && (rule.operator && rule.operator !== 'equals' || rule.customValue1 || rule.customValue2);
+    const isTextFuzzy = rule.comparisonMode !== 'numeric' && rule.operator === 'contains';
+    if (isNumericFuzzy || isTextFuzzy) {
+      fuzzyRules.push(rule);
+    } else {
+      exactRules.push(rule);
+    }
+  }
+  return { exactRules, fuzzyRules };
+};
+
 /**
- * Validates if two specific transaction rows perfectly match based on all mapping rules.
+ * Validates if two specific transaction rows match based on the provided mapping rules.
  */
 export const evaluateMatch = (
   bankRow: TransactionRow,
@@ -51,20 +66,52 @@ export const evaluateMatch = (
 
     if (rule.comparisonMode === 'numeric') {
       const cleanBank = bankVal.replace(/,/g, '');
-      const cleanErp = erpVal.replace(/,/g, '');
-
       const numBank = Number(cleanBank);
-      const numErp = Number(cleanErp);
 
-      if (isNaN(numBank) || isNaN(numErp) || numBank !== numErp) {
-        return false;
+      if (isNaN(numBank)) return false;
+
+      // Range check using custom values
+      const minVal = rule.customValue1 ? Number(rule.customValue1) : undefined;
+      const maxVal = rule.customValue2 ? Number(rule.customValue2) : undefined;
+
+      if (minVal !== undefined && !isNaN(minVal)) {
+        if (numBank < minVal) return false;
+      }
+      if (maxVal !== undefined && !isNaN(maxVal)) {
+        if (numBank > maxVal) return false;
+      }
+
+      // If neither custom value is provided, evaluate against ERP
+      if (minVal === undefined && maxVal === undefined) {
+        const cleanErp = erpVal.replace(/,/g, '');
+        const numErp = Number(cleanErp);
+        
+        if (isNaN(numErp)) return false;
+
+        const operator = rule.operator || 'equals';
+        switch (operator) {
+          case 'equals': if (numBank !== numErp) return false; break;
+          case 'less-than': if (numBank >= numErp) return false; break;
+          case 'greater-than': if (numBank <= numErp) return false; break;
+          case 'less-than-or-equal': if (numBank > numErp) return false; break;
+          case 'greater-than-or-equal': if (numBank < numErp) return false; break;
+          default: if (numBank !== numErp) return false; break;
+        }
       }
     } else {
-      if (bankVal.toLowerCase() !== erpVal.toLowerCase()) {
-        return false;
+      const operator = rule.operator || 'equals';
+      if (operator === 'contains') {
+        if (!bankVal.toLowerCase().includes(erpVal.toLowerCase())) {
+          return false;
+        }
+      } else {
+        if (bankVal.toLowerCase() !== erpVal.toLowerCase()) {
+          return false;
+        }
       }
     }
   }
 
   return true;
 };
+
