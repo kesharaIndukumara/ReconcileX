@@ -1,5 +1,5 @@
 {
-  "name": "rec-app",
+  "name": "Easy-ReconcileX",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -13,8 +13,10 @@
     "@tailwindcss/vite": "^4.2.2",
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.9.0",
+    "dotenv": "^8.2.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.8.0",
+    "node-fetch": "^3.3.2",
     "react": "^18.2.0",
     "react-confetti": "^6.4.0",
     "react-dom": "^18.2.0",

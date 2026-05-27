@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { ReconciliationState, ReconciliationResults, TransactionRow } from '../types';
-import { getRowSignature, splitRules, evaluateMatch } from '../utils/reconcile';
+import { ReconciliationState, ReconciliationResults, TransactionRow, RuleConfiguration } from '../types';
+import { getRowSignature, splitRules, evaluateMatch, evaluateConfiguration, flattenConfiguration, hasOrConnectors } from '../utils/reconcile';
 
 export const useReconciliation = (state: ReconciliationState | null) => {
   const [isProcessing, setIsProcessing] = useState(true);
@@ -16,13 +16,20 @@ export const useReconciliation = (state: ReconciliationState | null) => {
     let isMounted = true;
     const bankItems = [...state.parsedData.bankData];
     const erpItems = [...state.parsedData.erpData];
-    
-    const { exactRules, fuzzyRules } = splitRules(state.rules);
+
+    // Determine if we have a full configuration or legacy flat rules
+    const config: RuleConfiguration | null = state.configuration || null;
+    const useConfigMode = config && config.sections.length > 0;
+    const hasOr = config ? hasOrConnectors(config) : false;
+
+    // For backward compat and AND-only fast path, get flat rules
+    const flatRules = useConfigMode ? flattenConfiguration(config!) : state.rules;
+    const { exactRules, fuzzyRules } = splitRules(flatRules);
 
     // ========== Phase 1: Duplicate Detection (Exact Rules Only) ==========
     const bankSignatures = new Map<string, number>();
     let bankDuplicatesCount = 0;
-    if (exactRules.length > 0) {
+    if (exactRules.length > 0 && !hasOr) {
       for (const row of bankItems) {
         const sig = getRowSignature(row, exactRules, 'bank');
         const count = bankSignatures.get(sig) || 0;
@@ -33,7 +40,7 @@ export const useReconciliation = (state: ReconciliationState | null) => {
 
     const erpSignatures = new Map<string, number>();
     let erpDuplicatesCount = 0;
-    if (exactRules.length > 0) {
+    if (exactRules.length > 0 && !hasOr) {
       for (const row of erpItems) {
         const sig = getRowSignature(row, exactRules, 'erp');
         const count = erpSignatures.get(sig) || 0;
@@ -56,15 +63,19 @@ export const useReconciliation = (state: ReconciliationState | null) => {
     }
 
     // ========== Phase 2: Build ERP Lookup Map ==========
+    // When OR connectors exist, we can't bucket — all ERP rows go into one bucket
     const erpBuckets = new Map<string, TransactionRow[]>();
-    // If we have exact rules, build buckets by exact signature.
-    // If NO exact rules exist, we put everything into a single bucket under `""`.
-    for (const row of erpItems) {
-      const sig = exactRules.length > 0 ? getRowSignature(row, exactRules, 'erp') : "";
-      if (!erpBuckets.has(sig)) {
-        erpBuckets.set(sig, []);
+    if (hasOr) {
+      // Brute-force mode: single bucket
+      erpBuckets.set('', [...erpItems]);
+    } else {
+      for (const row of erpItems) {
+        const sig = exactRules.length > 0 ? getRowSignature(row, exactRules, 'erp') : "";
+        if (!erpBuckets.has(sig)) {
+          erpBuckets.set(sig, []);
+        }
+        erpBuckets.get(sig)!.push(row);
       }
-      erpBuckets.get(sig)!.push(row);
     }
 
     // ========== Phase 3: Match Bank Rows ==========
@@ -79,33 +90,81 @@ export const useReconciliation = (state: ReconciliationState | null) => {
 
       for (let i = currentIndex; i < end; i++) {
         const bankRow = bankItems[i];
-        const sig = exactRules.length > 0 ? getRowSignature(bankRow, exactRules, 'bank') : "";
-        const bucket = erpBuckets.get(sig);
-
         let matchedIndex = -1;
+        let matchBucket: TransactionRow[] | undefined;
 
-        if (bucket && bucket.length > 0) {
-          if (fuzzyRules.length === 0) {
-            // No fuzzy rules, so exact match is sufficient
-            matchedIndex = 0;
-          } else {
-            // We have fuzzy rules, we need to find the first ERP row in the bucket that satisfies them
+        if (hasOr && useConfigMode) {
+          // OR mode: search the single bucket using full configuration evaluation
+          const bucket = erpBuckets.get('');
+          if (bucket && bucket.length > 0) {
             for (let j = 0; j < bucket.length; j++) {
-              if (evaluateMatch(bankRow, bucket[j], fuzzyRules)) {
+              if (evaluateConfiguration(bankRow, bucket[j], config!)) {
                 matchedIndex = j;
+                matchBucket = bucket;
                 break;
+              }
+            }
+          }
+        } else if (useConfigMode && !hasOr) {
+          // AND-only config mode: use bucketing + per-section evaluation
+          const sig = exactRules.length > 0 ? getRowSignature(bankRow, exactRules, 'bank') : "";
+          const bucket = erpBuckets.get(sig);
+
+          if (bucket && bucket.length > 0) {
+            if (fuzzyRules.length === 0) {
+              // All rules are exact, and config is AND-only — bucket match is sufficient
+              // But we still need to verify section-level evaluation for correctness
+              for (let j = 0; j < bucket.length; j++) {
+                if (evaluateConfiguration(bankRow, bucket[j], config!)) {
+                  matchedIndex = j;
+                  matchBucket = bucket;
+                  break;
+                }
+              }
+            } else {
+              for (let j = 0; j < bucket.length; j++) {
+                if (evaluateConfiguration(bankRow, bucket[j], config!)) {
+                  matchedIndex = j;
+                  matchBucket = bucket;
+                  break;
+                }
+              }
+            }
+          }
+        } else {
+          // Legacy flat rules mode (backward compat)
+          const sig = exactRules.length > 0 ? getRowSignature(bankRow, exactRules, 'bank') : "";
+          const bucket = erpBuckets.get(sig);
+
+          if (bucket && bucket.length > 0) {
+            if (fuzzyRules.length === 0) {
+              matchedIndex = 0;
+              matchBucket = bucket;
+            } else {
+              for (let j = 0; j < bucket.length; j++) {
+                if (evaluateMatch(bankRow, bucket[j], fuzzyRules)) {
+                  matchedIndex = j;
+                  matchBucket = bucket;
+                  break;
+                }
               }
             }
           }
         }
 
-        if (matchedIndex !== -1 && bucket) {
-          // Remove the matched ERP row from the bucket and record it
-          const erpRow = bucket.splice(matchedIndex, 1)[0];
+        if (matchedIndex !== -1 && matchBucket) {
+          const erpRow = matchBucket.splice(matchedIndex, 1)[0];
           matchedItems.push({ bank: bankRow, erp: erpRow });
 
-          if (bucket.length === 0) {
-            erpBuckets.delete(sig);
+          // Clean up empty buckets
+          if (matchBucket.length === 0) {
+            // Find and remove the empty bucket
+            for (const [key, val] of erpBuckets.entries()) {
+              if (val === matchBucket) {
+                erpBuckets.delete(key);
+                break;
+              }
+            }
           }
         } else {
           unmatchedBankItems.push(bankRow);
@@ -150,4 +209,5 @@ export const useReconciliation = (state: ReconciliationState | null) => {
 
   return { isProcessing, processingProgress, results, duplicateWarnings };
 };
+
 
