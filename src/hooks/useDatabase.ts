@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useDatabase as useDbContext } from '../context/DatabaseContext';
-import { ReconciliationSession, MappingRule } from '../types';
+import { ReconciliationSession, MappingRule, RuleSection, SavedSection, RuleConfiguration } from '../types';
 
 export const useDatabase = useDbContext;
 
@@ -174,7 +174,8 @@ export const useAutoSaveSession = (sessionId: string | null, enabled: boolean = 
 };
 
 /**
- * Hook for managing rule templates with convenience methods
+ * Hook for managing rule templates with convenience methods.
+ * Supports both legacy flat MappingRule[] and new RuleConfiguration format.
  */
 export const useRuleTemplates = () => {
   const { rules, loading, refresh, saveRule, deleteRule, duplicateRule } = useSavedRules();
@@ -189,6 +190,62 @@ export const useRuleTemplates = () => {
       return ruleId;
     },
     [saveRule, setPreference]
+  );
+
+  /**
+   * Save a full RuleConfiguration as a template.
+   * We flatten the rules for backward compat storage, and store the full config in preferences.
+   */
+  const saveConfigurationAsTemplate = useCallback(
+    async (config: RuleConfiguration, name: string, description?: string) => {
+      // Flatten all section rules for the legacy rules array
+      const flatRules = config.sections.flatMap(s => s.rules);
+      const ruleId = await saveRule(flatRules, name, description);
+      if (ruleId) {
+        // Store the full configuration alongside the saved rule
+        await setPreference(`template_config_${ruleId}`, config);
+        await setPreference('lastUsedRuleId', ruleId);
+      }
+      return ruleId;
+    },
+    [saveRule, setPreference]
+  );
+
+  /**
+   * Load a configuration for a template. Falls back to wrapping legacy rules in a single section.
+   */
+  const getTemplateConfiguration = useCallback(
+    (templateId: string): RuleConfiguration | null => {
+      const template = rules.find(r => r.id === templateId);
+      if (!template) return null;
+
+      // Check if a full configuration was stored
+      const storedConfig = getPreference<RuleConfiguration>(`template_config_${templateId}`);
+      if (storedConfig && storedConfig.sections && storedConfig.sections.length > 0) {
+        // Deep clone with new IDs
+        return {
+          sections: storedConfig.sections.map(s => ({
+            ...s,
+            id: crypto.randomUUID(),
+            rules: s.rules.map(r => ({ ...r, id: crypto.randomUUID() })),
+          })),
+          connectors: storedConfig.connectors.map(c => ({ ...c })),
+        };
+      }
+
+      // Backward compat: wrap legacy flat rules in a single section
+      return {
+        sections: [
+          {
+            id: crypto.randomUUID(),
+            name: template.name || 'Section 1',
+            rules: template.rules.map(r => ({ ...r, id: crypto.randomUUID() })),
+          },
+        ],
+        connectors: [],
+      };
+    },
+    [rules, getPreference]
   );
 
   const getLastUsedTemplate = useCallback(() => {
@@ -211,10 +268,67 @@ export const useRuleTemplates = () => {
     loading,
     refresh,
     saveAsTemplate,
+    saveConfigurationAsTemplate,
+    getTemplateConfiguration,
     deleteTemplate: deleteRule,
     duplicateTemplate: duplicateRule,
     getLastUsedTemplate,
     setLastUsedTemplate,
+  };
+};
+
+/**
+ * Hook for managing saved sections (reuse library).
+ * Uses preferences storage to persist saved sections as a JSON array.
+ */
+export const useSavedSections = () => {
+  const { getPreference, setPreference } = usePreferences();
+  const [savedSections, setSavedSections] = useState<SavedSection[]>([]);
+
+  // Load saved sections from preferences
+  useEffect(() => {
+    const stored = getPreference<SavedSection[]>('savedSections', []);
+    if (Array.isArray(stored)) {
+      setSavedSections(stored);
+    }
+  }, [getPreference]);
+
+  const saveSection = useCallback(
+    async (section: RuleSection, name: string, description?: string) => {
+      const newSaved: SavedSection = {
+        id: crypto.randomUUID(),
+        name,
+        description,
+        section: {
+          ...section,
+          id: crypto.randomUUID(),
+          rules: section.rules.map(r => ({ ...r, id: crypto.randomUUID() })),
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const updated = [...savedSections, newSaved];
+      setSavedSections(updated);
+      await setPreference('savedSections', updated);
+      return newSaved.id;
+    },
+    [savedSections, setPreference]
+  );
+
+  const deleteSection = useCallback(
+    async (sectionId: string) => {
+      const updated = savedSections.filter(s => s.id !== sectionId);
+      setSavedSections(updated);
+      await setPreference('savedSections', updated);
+    },
+    [savedSections, setPreference]
+  );
+
+  return {
+    savedSections,
+    saveSection,
+    deleteSection,
   };
 };
 
