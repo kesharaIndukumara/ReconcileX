@@ -8,6 +8,42 @@ export interface MappingRule {
   customValue2?: string;
 }
 
+// ============ MODULAR RULE BUILDER TYPES ============
+
+/** A bundle/section of rules — internal logic is always AND */
+export interface RuleSection {
+  id: string;
+  name: string;
+  rules: MappingRule[];
+  colorAccent?: string;
+}
+
+/** Logic connector between adjacent sections */
+export type LogicOperator = 'AND' | 'OR';
+
+export interface SectionConnector {
+  afterSectionId: string;
+  logic: LogicOperator;
+}
+
+/** Full rule configuration — sections connected by logic operators */
+export interface RuleConfiguration {
+  sections: RuleSection[];
+  connectors: SectionConnector[]; // Length = sections.length - 1
+}
+
+/** Saved section for the reuse library */
+export interface SavedSection {
+  id: string;
+  name: string;
+  description?: string;
+  section: RuleSection;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ============ CORE DATA TYPES ============
+
 export type TransactionRow = Record<string, string | number | undefined>;
 
 export interface ParsedDataState {
@@ -18,6 +54,7 @@ export interface ParsedDataState {
 export interface ReconciliationState {
   parsedData: ParsedDataState;
   rules: MappingRule[];
+  configuration?: RuleConfiguration;
   bankFileName?: string;
   erpFileName?: string;
 }
@@ -41,6 +78,7 @@ export interface SavedRule {
   name: string;
   description?: string;
   rules: MappingRule[];
+  configuration?: RuleConfiguration;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -51,6 +89,7 @@ export interface ReconciliationSession {
   bankFileName: string;
   erpFileName: string;
   rules: MappingRule[];
+  configuration?: RuleConfiguration;
   matchedPairs: MatchedPair[];
   unmatchedBank: TransactionRow[];
   unmatchedERP: TransactionRow[];
