@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { SavedRule, ReconciliationSession, MappingRule } from '../types';
+import {DatabaseAPI} from "../vite-env";
 
 // Helper function to safely access window.db (typed via src/types/database.d.ts)
 function getDb(): DatabaseAPI | null {
