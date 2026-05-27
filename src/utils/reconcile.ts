@@ -1,4 +1,4 @@
-import { MappingRule, TransactionRow } from '../types';
+import { MappingRule, TransactionRow, RuleConfiguration, RuleSection } from '../types';
 
 const INVALID_NUMERIC_PREFIX = '__INVALID_NUMERIC__';
 
@@ -114,4 +114,63 @@ export const evaluateMatch = (
 
   return true;
 };
+
+// ============ SECTION-BASED EVALUATION ============
+
+/**
+ * Evaluates a single section (bundle) — all rules within are AND-connected.
+ * Returns true if ALL rules in the section match the given bank/erp row pair.
+ */
+export const evaluateSection = (
+  bankRow: TransactionRow,
+  erpRow: TransactionRow,
+  section: RuleSection
+): boolean => {
+  return evaluateMatch(bankRow, erpRow, section.rules);
+};
+
+/**
+ * Evaluates a full RuleConfiguration — sections connected via AND/OR logic.
+ * Evaluation is left-to-right (no operator precedence).
+ */
+export const evaluateConfiguration = (
+  bankRow: TransactionRow,
+  erpRow: TransactionRow,
+  config: RuleConfiguration
+): boolean => {
+  if (config.sections.length === 0) return false;
+
+  let result = evaluateSection(bankRow, erpRow, config.sections[0]);
+
+  for (let i = 1; i < config.sections.length; i++) {
+    const connector = config.connectors[i - 1];
+    const sectionResult = evaluateSection(bankRow, erpRow, config.sections[i]);
+
+    if (connector?.logic === 'OR') {
+      result = result || sectionResult;
+    } else {
+      // Default to AND
+      result = result && sectionResult;
+    }
+  }
+
+  return result;
+};
+
+/**
+ * Flattens a RuleConfiguration into a flat array of MappingRule[] (for backward compat).
+ * Useful for signature-based bucketing when all connectors are AND.
+ */
+export const flattenConfiguration = (config: RuleConfiguration): MappingRule[] => {
+  return config.sections.flatMap(s => s.rules);
+};
+
+/**
+ * Checks whether a configuration has any OR connectors.
+ * When OR connectors exist, the bucketing optimization cannot be used.
+ */
+export const hasOrConnectors = (config: RuleConfiguration): boolean => {
+  return config.connectors.some(c => c.logic === 'OR');
+};
+
 
