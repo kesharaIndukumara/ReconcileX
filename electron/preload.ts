@@ -87,3 +87,9 @@ const db = {
 
 contextBridge.exposeInMainWorld('db', db)
 
+// --------- File export bridge ---------
+contextBridge.exposeInMainWorld('exporter', {
+  save: (args: { defaultName: string; base64: string; ext: string }) =>
+    ipcRenderer.invoke('export:save', args),
+})
+
