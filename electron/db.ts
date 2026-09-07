@@ -480,6 +480,11 @@ export function closeDatabase(): void {
   }
 }
 
+export function clearHistory(): void {
+  const database = getDatabase();
+  database.exec('DELETE FROM history');
+}
+
 export function resetDatabase(): void {
   const database = getDatabase();
   database.exec('DELETE FROM rules');

@@ -263,6 +263,24 @@ ipcMain.handle('db:optimize', () => {
   }
 })
 
+ipcMain.handle('db:clearHistory', () => {
+  try {
+    db.clearHistory()
+    return { success: true }
+  } catch (error) {
+    return { error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('db:resetDatabase', () => {
+  try {
+    db.resetDatabase()
+    return { success: true }
+  } catch (error) {
+    return { error: (error as Error).message }
+  }
+})
+
 // Clean up database on app quit
 app.on('before-quit', () => {
   db.closeDatabase()

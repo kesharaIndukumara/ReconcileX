@@ -1,14 +1,14 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 import * as XLSX from 'xlsx';
 import { ArrowLeft, Activity, Download, AlertTriangle, Save } from 'lucide-react';
-import { ReconciliationState, TransactionRow } from '../types';
+import { ReconciliationState, ReconciliationResults, TransactionRow, DuplicateStrategy } from '../types';
 import { CONFETTI_THRESHOLD } from '../utils/constants';
 import { useReconciliation } from '../hooks/useReconciliation';
-import { useSessions } from '../hooks/useDatabase';
+import { useDatabase, useSessions, usePreferences } from '../hooks/useDatabase';
 import { ProcessingOverlay } from '../components/ProcessingOverlay';
 import { StatsCards, TabType } from '../components/StatsCards';
 import { MatchRateBadge } from '../components/MatchRateBadge';
@@ -16,28 +16,64 @@ import { ResultsTable } from '../components/ResultsTable';
 import { StepIndicator } from '../components/StepIndicator';
 import { Toast } from '../components/Toast';
 
+type ReconLocationState = ReconciliationState & {
+  /** 'review' opens a saved session read-only from the history browser. */
+  mode?: 'live' | 'review';
+  savedResults?: ReconciliationResults;
+  sessionLabel?: string;
+};
+
+const EMPTY_PARSED = { bankData: [], erpData: [] };
+
+const timestampName = () => {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `Reconciliation_${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
+};
+
 export const ReconciliationScreen = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { width, height } = useWindowSize();
 
-  const state = location.state as ReconciliationState | null;
+  const state = location.state as ReconLocationState | null;
+  const isReview = state?.mode === 'review';
 
   const [activeTab, setActiveTab] = useState<TabType>('matched');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isSavingSession, setIsSavingSession] = useState(false);
   const [toast, setToast] = useState<{ show: boolean; msg: string; type: 'error' | 'success' }>({ show: false, msg: '', type: 'error' });
-  
-  const { isProcessing, processingProgress, results, duplicateWarnings } = useReconciliation(state);
+
+  const { getPreference } = usePreferences();
+  const duplicateStrategy = getPreference<DuplicateStrategy>('duplicateStrategy', 'first-wins');
+  const confettiEnabled = getPreference<boolean>('confettiEnabled', true);
+
+  // In review mode we feed the engine empty data (it finishes instantly) and show the
+  // saved results instead.
+  const engineState = useMemo<ReconciliationState | null>(() => {
+    if (!state) return null;
+    if (isReview) return { ...state, parsedData: EMPTY_PARSED };
+    return state;
+  }, [state, isReview]);
+
+  const engine = useReconciliation(engineState, { duplicateStrategy });
+  const results = isReview && state?.savedResults ? state.savedResults : engine.results;
+  const { isProcessing, processingProgress, duplicateGroups, duplicateSummary } = engine;
+
   const { createSession, updateSession } = useSessions();
+  const { logEvent } = useDatabase();
 
-  // Create and auto-save session
+  const duplicateCount = duplicateSummary.bank.extras + duplicateSummary.erp.extras;
+  const duplicateGroupCount = duplicateSummary.bank.groups + duplicateSummary.erp.groups;
+
+  // Create the session row as soon as a live run starts.
   useEffect(() => {
-    const createAndSaveSession = async () => {
-      if (!state || sessionId) return;
+    if (isReview || !state || sessionId) return;
+    let cancelled = false;
 
+    (async () => {
       try {
-        const newSessionId = await createSession({
+        const newId = await createSession({
           bankFileName: state.bankFileName || 'bank-data',
           erpFileName: state.erpFileName || 'erp-data',
           rules: state.rules,
@@ -47,26 +83,29 @@ export const ReconciliationScreen = () => {
           matchPercentage: 0,
           isActive: true,
         });
-
-        if (newSessionId) {
-          setSessionId(newSessionId);
+        if (newId && !cancelled) {
+          setSessionId(newId);
+          void logEvent({
+            sessionId: newId,
+            eventType: 'session_start',
+            eventData: { bankFileName: state.bankFileName, erpFileName: state.erpFileName, rules: state.rules.length },
+          });
         }
       } catch (err) {
         console.error('Failed to create session:', err);
       }
-    };
+    })();
 
-    createAndSaveSession();
-  }, [state, sessionId, createSession]);
+    return () => { cancelled = true; };
+  }, [isReview, state, sessionId, createSession, logEvent]);
 
-  // Auto-save session progress once after reconciliation completes
+  // Persist the outcome once, when a live run finishes.
   const hasSavedRef = useRef(false);
   useEffect(() => {
-    if (!sessionId || isProcessing || hasSavedRef.current) return;
-    // Only save once when processing finishes and we have a session
+    if (isReview || !sessionId || isProcessing || hasSavedRef.current) return;
     hasSavedRef.current = true;
 
-    const saveProgress = async () => {
+    (async () => {
       try {
         await updateSession(sessionId, {
           matchedPairs: results.matched,
@@ -75,13 +114,21 @@ export const ReconciliationScreen = () => {
           matchPercentage: results.progress,
           isActive: false,
         });
+        void logEvent({
+          sessionId,
+          eventType: 'session_complete',
+          eventData: {
+            matchPercentage: results.progress,
+            matched: results.matched.length,
+            unmatchedBank: results.unmatchedBank.length,
+            unmatchedERP: results.unmatchedERP.length,
+          },
+        });
       } catch (err) {
         console.error('Failed to save session progress:', err);
       }
-    };
-
-    saveProgress();
-  }, [sessionId, isProcessing, results, updateSession]);
+    })();
+  }, [isReview, sessionId, isProcessing, results, updateSession, logEvent]);
 
   const handleExport = () => {
     const wb = XLSX.utils.book_new();
@@ -90,15 +137,27 @@ export const ReconciliationScreen = () => {
     const flatBank = results.unmatchedBank.map(b => ({ ...b, Match_Status: 'UNMATCHED - ONLY IN BANK' }));
     const flatErp = results.unmatchedERP.map(e => ({ ...e, Match_Status: 'UNMATCHED - ONLY IN ERP' }));
 
-    const wsMatched = XLSX.utils.json_to_sheet(flatMatched as TransactionRow[]);
-    const wsBank = XLSX.utils.json_to_sheet(flatBank as TransactionRow[]);
-    const wsErp = XLSX.utils.json_to_sheet(flatErp as TransactionRow[]);
+    const summaryRows = [
+      { Metric: 'Bank file', Value: state?.bankFileName ?? '' },
+      { Metric: 'ERP file', Value: state?.erpFileName ?? '' },
+      { Metric: 'Run at', Value: new Date().toLocaleString() },
+      { Metric: 'Rules', Value: state?.rules.length ?? 0 },
+      { Metric: 'Matched', Value: results.matched.length },
+      { Metric: 'Unmatched (Bank)', Value: results.unmatchedBank.length },
+      { Metric: 'Unmatched (ERP)', Value: results.unmatchedERP.length },
+      { Metric: 'Combined match rate %', Value: results.progress },
+      { Metric: 'Bank match rate %', Value: results.bankMatchRate },
+      { Metric: 'ERP match rate %', Value: results.erpMatchRate },
+      { Metric: 'Duplicate groups', Value: duplicateGroupCount },
+      { Metric: 'Duplicate extra rows', Value: duplicateCount },
+    ];
 
-    XLSX.utils.book_append_sheet(wb, wsMatched, "Matched");
-    XLSX.utils.book_append_sheet(wb, wsBank, "Unmatched Bank");
-    XLSX.utils.book_append_sheet(wb, wsErp, "Unmatched ERP");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flatMatched as TransactionRow[]), 'Matched');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flatBank as TransactionRow[]), 'Unmatched Bank');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flatErp as TransactionRow[]), 'Unmatched ERP');
 
-    XLSX.writeFile(wb, "Reconciliation_Report.xlsx");
+    XLSX.writeFile(wb, `${timestampName()}.xlsx`);
   };
 
   const handleSaveSession = async () => {
@@ -109,11 +168,11 @@ export const ReconciliationScreen = () => {
         matchPercentage: results.progress,
         isActive: false,
       });
-      if (success) {
-        setToast({ show: true, msg: 'Session saved successfully!', type: 'success' });
-      } else {
-        setToast({ show: true, msg: 'Failed to save session', type: 'error' });
-      }
+      setToast(
+        success
+          ? { show: true, msg: 'Session saved.', type: 'success' }
+          : { show: true, msg: 'Failed to save session', type: 'error' }
+      );
     } catch (err) {
       setToast({ show: true, msg: `Error: ${(err as Error).message}`, type: 'error' });
     } finally {
@@ -126,44 +185,49 @@ export const ReconciliationScreen = () => {
     return null;
   }
 
-  if (isProcessing) {
+  if (!isReview && isProcessing) {
     return <ProcessingOverlay progress={processingProgress} />;
   }
+
+  const processedCount = results.matched.length + results.unmatchedBank.length + results.unmatchedERP.length;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 overflow-hidden flex flex-col items-center">
       <StepIndicator currentStep={3} />
-      <Toast 
-        message={toast.msg} 
-        type={toast.type} 
-        isVisible={toast.show} 
-        onClose={() => setToast({ ...toast, show: false })} 
+      <Toast
+        message={toast.msg}
+        type={toast.type}
+        isVisible={toast.show}
+        onClose={() => setToast({ ...toast, show: false })}
       />
-      
-      {results.progress >= CONFETTI_THRESHOLD && <Confetti width={width} height={height} recycle={false} numberOfPieces={500} />}
-      
-      {/* Top Header & Progress Context */}
+
+      {!isReview && confettiEnabled && results.progress >= CONFETTI_THRESHOLD && (
+        <Confetti width={width} height={height} recycle={false} numberOfPieces={500} />
+      )}
+
       <div className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-6 shadow-sm z-10 w-full">
         <div className="max-w-7xl mx-auto w-full">
           <div className="flex items-center justify-between mb-6">
-            <button 
-              onClick={() => navigate(-1)} 
+            <button
+              onClick={() => (isReview ? navigate('/history') : navigate(-1))}
               className="flex items-center text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
             >
               <ArrowLeft className="w-4 h-4 mr-2" />
-              Adjust Rules
+              {isReview ? 'Back to History' : 'Adjust Rules'}
             </button>
             <div className="flex gap-4">
-              <button 
-                onClick={handleSaveSession}
-                disabled={isSavingSession}
-                className="flex items-center px-4 py-2 bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-500/30 transition-colors font-medium text-sm disabled:opacity-50"
-              >
-                <Save className="w-4 h-4 mr-2" />
-                {isSavingSession ? 'Saving...' : 'Save Session'}
-              </button>
-              <button 
-                onClick={handleExport} 
+              {!isReview && (
+                <button
+                  onClick={handleSaveSession}
+                  disabled={isSavingSession}
+                  className="flex items-center px-4 py-2 bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-500/30 transition-colors font-medium text-sm disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  {isSavingSession ? 'Saving...' : 'Save Session'}
+                </button>
+              )}
+              <button
+                onClick={handleExport}
                 className="flex items-center px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm"
               >
                 <Download className="w-4 h-4 mr-2" />
@@ -176,13 +240,14 @@ export const ReconciliationScreen = () => {
             <div>
               <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center">
                 <Activity className="w-8 h-8 mr-3 text-blue-600" />
-                Reconciliation Complete
+                {isReview ? (state.sessionLabel || 'Saved Reconciliation') : 'Reconciliation Complete'}
               </h1>
               <p className="mt-2 text-slate-500 dark:text-slate-400">
-                Processed {results.matched.length + results.unmatchedBank.length + results.unmatchedERP.length} items using your custom rules.
+                {processedCount} rows · {results.matched.length} matched, {results.unmatchedBank.length} bank-only,
+                {' '}{results.unmatchedERP.length} ERP-only.
               </p>
             </div>
-            
+
             <MatchRateBadge
               progress={results.progress}
               bankMatchRate={results.bankMatchRate}
@@ -192,40 +257,36 @@ export const ReconciliationScreen = () => {
         </div>
       </div>
 
-      {/* Main Content Area */}
       <div className="max-w-7xl w-full p-6 mt-6">
-        
-        {duplicateWarnings.length > 0 && (
-           <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800/50 rounded-2xl p-6 flex flex-col items-start shadow-sm">
-             <div className="flex items-center text-yellow-800 dark:text-yellow-400 font-bold text-lg mb-2">
-               <AlertTriangle className="w-6 h-6 mr-3" />
-               Potential Duplications Detected
-             </div>
-             <p className="text-yellow-700 dark:text-yellow-500/80 mb-2 font-medium">
-               We detected rows with identical mapping properties. Because 1-to-1 matching is strictly enforced, excess duplicates may be pushed to the Unmatched lists.
-             </p>
-             <ul className="list-disc list-inside text-yellow-800 dark:text-yellow-500 font-bold space-y-1 ml-2">
-               {duplicateWarnings.map((w, idx) => (
-                 <li key={idx}>
-                    {w.type === 'bank' ? 'Bank Statement' : 'ERP Data'} has {w.count} duplicated transaction(s).
-                 </li>
-               ))}
-             </ul>
-           </div>
+        {!isReview && duplicateGroupCount > 0 && (
+          <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800/50 rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center text-yellow-800 dark:text-yellow-400 font-bold text-lg mb-2">
+              <AlertTriangle className="w-6 h-6 mr-3" />
+              {duplicateGroupCount} group{duplicateGroupCount === 1 ? '' : 's'} of identical rows ({duplicateCount} extra cop{duplicateCount === 1 ? 'y' : 'ies'})
+            </div>
+            <p className="text-yellow-700 dark:text-yellow-500/80 font-medium">
+              {duplicateStrategy === 'all-unmatched'
+                ? 'Every copy in a duplicate group was sent to the Unmatched lists for manual review (set in Settings).'
+                : 'Only the first row in each group can match 1-to-1; the rest moved to the Unmatched lists.'}
+              {' '}Open the <span className="font-bold">Duplicate Rows</span> tab to see them.
+            </p>
+          </div>
         )}
 
-        <StatsCards 
-          activeTab={activeTab} 
-          setActiveTab={setActiveTab} 
+        <StatsCards
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
           matchedCount={results.matched.length}
           unmatchedBankCount={results.unmatchedBank.length}
           unmatchedERPCount={results.unmatchedERP.length}
+          duplicateCount={isReview ? 0 : duplicateCount}
         />
 
-        <ResultsTable 
-          activeTab={activeTab} 
-          results={results} 
+        <ResultsTable
+          activeTab={activeTab}
+          results={results}
           rules={state.rules}
+          duplicateGroups={duplicateGroups}
         />
       </div>
     </div>

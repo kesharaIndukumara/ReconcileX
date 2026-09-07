@@ -57,6 +57,8 @@ declare global {
     // Database Maintenance
     vacuum(): Promise<unknown>
     optimize(): Promise<unknown>
+    clearHistory(): Promise<unknown>
+    resetDatabase(): Promise<unknown>
   }
 
   // Used in Renderer process, exposed in `preload.ts`
