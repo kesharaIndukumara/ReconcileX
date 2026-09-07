@@ -1,12 +1,17 @@
 // @see - https://www.electron.build/configuration/configuration
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
-  "appId": "YourAppID",
+  "appId": "com.reconcilex.app",
   "asar": true,
-  "productName": "YourAppName",
+  "productName": "ReconcileX",
+  // Rebuilds better-sqlite3 for Electron's ABI when packaging.
+  "npmRebuild": true,
   "directories": {
-    "output": "release/${version}"
+    "output": "release/${version}",
+    "buildResources": "build"
   },
+  // Drop a 512x512+ build/icon.png to brand the installers; electron-builder
+  // auto-discovers it and derives .ico / .icns. Falls back to the Electron icon.
   "files": [
     "dist",
     "dist-electron"

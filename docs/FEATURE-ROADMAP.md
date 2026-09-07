@@ -4,8 +4,9 @@ A feature-by-feature plan: what exists, what to change, and which new features a
 building next. Written against the current codebase (single commit `1dc9317`, post
 dependency upgrade).
 
-> **Progress:** v0.1, v0.2 and **v0.3 ("Matching that matches reality")** are implemented —
-> see the Implementation log at the bottom. Rows below are marked ✅ when done.
+> **Progress:** v0.1–v0.4 are implemented (v0.4 = "Scale & ship", minus manual match /
+> toast queue / auto-update, deferred to v0.5). See the Implementation log at the bottom.
+> Rows are marked ✅ when done, ⏳ when partial.
 
 ## Legend
 
@@ -60,9 +61,9 @@ dependency upgrade).
 | # | Change | Priority | Effort | Notes |
 |---|--------|----------|--------|-------|
 | 1 | ✅ **Thresholds unified** in `src/utils/constants.ts`; confetti fires at the "great" tier and respects the `confettiEnabled` setting. | P0 | S | Done (v0.1 / v0.2) |
-| 2 | **Results table caps at 100 rows** with no way to see the rest in-app. Add search + column sort + virtualized scroll or pagination. | P1 | M | v0.4 |
-| 3 | ⏳ **Export** — **Summary sheet** and timestamped filename done (v0.2). Electron `dialog.showSaveDialog` still pending. | P1 | M | Partial (v0.2) → save dialog v0.4 |
-| 4 | **Per-tab export** and a **CSV** option. | P2 | S | v0.4 |
+| 2 | ✅ **Search + sort + pagination** (50/page) on the matched and unmatched tables — no `react-window` dep; virtualization still an option if 50/page proves too small. | P1 | M | Done (v0.4) |
+| 3 | ✅ **Export** — Summary sheet + timestamped name (v0.2); Electron `dialog.showSaveDialog` via `export:save` IPC, browser download fallback; Group Matches sheet (v0.4). | P1 | M | Done (v0.4) |
+| 4 | ✅ **CSV** export (single flattened sheet). Per-tab export not added — the CSV/xlsx already carry `Match_Status`. | P2 | S | Done (v0.4) |
 | 5 | ✅ **"Why unmatched?"** — each unmatched row expands to show the closest row on the other side, rule-by-rule (✓/✗ with both values). | P2 | M | Done (v0.3) |
 | 6 | **Empty states** per tab instead of bare grey text; loading skeletons. | P3 | S | Partial (v0.3) |
 
@@ -167,24 +168,17 @@ Data preview (first 4 rows/side) + "Suggest mappings" (`src/utils/mapping.ts`:
 `headerSimilarity`, `guessComparisonMode`, `suggestMappings`). Value-shape detection
 (sampling actual cell values, not just headers) could still improve the mode guess.
 
-### 2.6 One-to-many matching  ·  **P2 · Effort L**
+### 2.6 One-to-many matching  ·  **P2 · Effort L · ✅ DONE (v0.4)**
 
-**Problem:** a batched deposit in the bank statement = N invoice lines in ERP (and vice
-versa). Strict 1-to-1 can never match these.
+Pass 3 in `engine.ts`: for each leftover row, `subsetSum` finds ≤`MAX_GROUP` rows on the
+other side whose primary numeric value sums to it (non-numeric rules must still all
+agree). Both directions. Skipped above `GROUP_LEFTOVER_CAP` leftovers. Rendered as a
+"one-to-many" block in the Matched tab; exported as a **Group Matches** sheet.
 
-**Options**
+### 2.7 Sheet & header controls  ·  **P2 · Effort S–M · ✅ DONE (v0.4)**
 
-| Option | Verdict |
-|--------|---------|
-| A. Skip it | Acceptable for v1, but it's a common reconciliation case |
-| B. Sum-subset search: for an unmatched bank row, find a small combination of unmatched ERP rows whose mapped numeric field sums to it (cap at 3–4 to bound cost) | ✅ **Recommended**, as an optional third pass after 2.1. Flag as "group match" |
-| C. User manually builds groups | Ship as part of 2.2's UI; B auto-proposes, C confirms |
-
-### 2.7 Sheet & header controls  ·  **P2 · Effort S–M**
-
-Only the first worksheet is read and the header is assumed to be row 1. Add: a sheet
-picker when a workbook has multiple sheets, and a "header is on row N / skip N top rows"
-control. Cheap, removes a class of "no columns detected" support questions.
+`useFileParser.inspectSheets()` lists sheet names; a `<select>` appears per file when a
+workbook has more than one. A "Header is on row N" input feeds `sheet_to_json`'s `range`.
 
 ### 2.8 Test suite  ·  **P1 · ✅ STARTED (v0.1 / v0.2)**
 
@@ -199,11 +193,14 @@ Vitest (`vitest.config.ts`, standalone). `src/utils/reconcile.test.ts` — 14 ca
 - Tooltips from 1.2.6.
 - A "How matching works" help panel (strict → fuzzy → groups).
 
-### 2.10 Packaging & distribution  ·  **P2 · Effort M**
+### 2.10 Packaging & distribution  ·  **⏳ Partial (v0.4)**
 
-Real `appId` / `productName`; `@electron/rebuild` + a `postinstall` so `better-sqlite3`
-matches Electron's ABI (currently it's built for Node and will fail at runtime under a
-packaged app / `npm run dev`); `electron-updater` for auto-update; app icon set.
+Done: real `appId` (`com.reconcilex.app`) / `productName` (`ReconcileX`);
+`directories.buildResources: build`; `npmRebuild: true`; `@electron/rebuild` devDep +
+`npm run rebuild` script (rebuilds `better-sqlite3` for Electron's ABI — run before
+`npm run dev` / packaging).
+Still TODO: drop a real `build/icon.png`; `electron-updater` wiring (needs a release feed
+URL, so left for when a distribution channel exists).
 
 ---
 
@@ -212,12 +209,12 @@ packaged app / `npm run dev`); `electron-updater` for auto-update; app icon set.
 | # | Change | Priority | Effort | Status |
 |---|--------|----------|--------|--------|
 | 1 | Real dark mode + toggle and dark-aware `Toast` | P0 | S | ✅ v0.1 |
-| 2 | One feedback system: no `alert()`, a `Toast` **queue** so rapid errors don't overwrite | P1 | S | `alert()` gone (v0.1); queue → v0.4 |
-| 3 | `ProcessingOverlay`: % + **elapsed time + Cancel** shipped (v0.3). Live "matched X / Y" counter not yet streamed from the worker. | P1 | S | Partial (v0.3) |
-| 4 | Accessibility: `aria-*` on tabs, keyboard `FileDropzone`, focus trap + `Esc` in modals | P1 | M | `aria-pressed` on tabs (v0.2); rest → v0.4 |
-| 5 | `ErrorBoundary` "Return to Start" wipes parsed data — confirm / persist | P2 | M | v0.4 |
-| 6 | Consistent number formatting in tables and stat cards | P3 | S | v0.4 |
-| 7 | Bundle 835 kB — lazy-load `xlsx` and `react-confetti` | P2 | S | v0.4 |
+| 2 | One feedback system: no `alert()`, a `Toast` **queue** so rapid errors don't overwrite | P1 | S | ✅ `alert()` gone (v0.1); ⏳ queue → v0.5 |
+| 3 | `ProcessingOverlay`: % + elapsed + Cancel | P1 | S | ✅ v0.3 (live "matched X / Y" counter → v0.5) |
+| 4 | Accessibility: `aria-*` tabs, keyboard `FileDropzone`, `Esc` in modals | P1 | M | ✅ tabs `aria-pressed` (v0.2); `FileDropzone` focus ring + `aria-label`, modal `Esc` (v0.4); full focus-trap → v0.5 |
+| 5 | `ErrorBoundary` "Return to Start" wipes parsed data — confirm / persist | P2 | M | ⏳ v0.5 |
+| 6 | ✅ Consistent number formatting (`toLocaleString`) in result tables | P3 | S | Done (v0.4) |
+| 7 | ✅ Lazy-load `xlsx` + `react-confetti` — main bundle 942 kB → **458 kB** (gzip 300 → 141) | P2 | S | Done (v0.4) |
 
 ---
 
@@ -238,10 +235,16 @@ Per-rule tolerance + two-pass engine · Web Worker + Cancel · "why unmatched?" 
 data preview + auto-suggest mappings · resume carries forward matches · `date` mode.
 (Deferred: **manual match/unmatch** → v0.4.)
 
-### v0.4 — "Scale & ship" — next
-Manual match/unmatch (checkbox model) · virtualized results + search/sort ·
-export save-dialog + CSV · one-to-many group matching · sheet/header controls ·
-Toast queue · a11y pass · lazy-load `xlsx`/`confetti` · packaging (rebuild, updater, icon, appId).
+### v0.4 — "Scale & ship" — ✅ DONE (core)
+Search + sort + pagination · one-to-many group matching · sheet/header controls ·
+Electron save-dialog + CSV + Group Matches sheet · lazy-load `xlsx`/`confetti`
+(458 kB main) · number formatting · `FileDropzone`/modal a11y · packaging config
+(appId, productName, `npm run rebuild`, `@electron/rebuild`).
+
+### v0.5 — "Polish & distribute" — next
+Manual match/unmatch (checkbox, `__rowId`) · `Toast` queue provider · full modal
+focus-trap · `ErrorBoundary` state persistence · live "matched X/Y" from the worker ·
+`build/icon.png` + `electron-updater` · per-session history timeline · auto-save interval editor.
 
 ---
 
@@ -306,7 +309,26 @@ Branch `feat/v0.3-matching-reality` off `feat/v0.2-use-whats-built`.
 
 Gate: `tsc` ✓ · `lint` ✓ · `test` 32/32 ✓ · `vite build` ✓ (worker emitted as its own chunk).
 
-### Deferred to v0.4
-- **Manual match / unmatch** (checkbox model; needs stable `__rowId` at parse time).
-- Per-session event *timeline* UI; auto-save *interval* editor; `useColumnDefaults`.
-- Export **save dialog** (Electron IPC); live "matched X / Y" counter from the worker.
+### v0.4 — "Scale & ship"
+Branch `feat/v0.4-scale-and-ship` off `feat/v0.3-matching-reality`.
+
+| Area | Files |
+|------|-------|
+| Engine | `engine.ts` pass 3 (`subsetSum`, `MAX_GROUP`, `GROUP_LEFTOVER_CAP`), `GroupMatch` type, `ReconciliationResults.groupMatched` |
+| Parsing | `useFileParser.ts` — `inspectSheets()`, `ParseOptions` (`headerRow` → `range`, `bankSheet`/`erpSheet`), lazy `import('xlsx')` |
+| Results UI | `ResultsTable.tsx` — `SearchBox` / `Pager` / `fmtCell`; `UnmatchedView` gets filter + click-to-sort + 50/page; `MatchedView` gets filter + pagination + `GroupMatchesBlock` |
+| Export | `ReconciliationScreen.tsx` — `handleExport('xlsx'|'csv')`, `deliver()` (Electron `export:save` IPC or browser download), Summary + Group Matches sheets; `Confetti` via `React.lazy`+`Suspense` |
+| Electron | `main.ts` (`export:save` w/ `dialog`+`fs`), `preload.ts` (`window.exporter`), `electron-env.d.ts` (`ExporterAPI`) |
+| a11y / polish | `FileDropzone` focus ring + `aria-label`; `MappingScreen` modal `Esc`; `toLocaleString` in tables |
+| Packaging | `electron-builder.json5` (real `appId`/`productName`, `buildResources`, `npmRebuild`); `package.json` `rebuild` script; `@electron/rebuild` devDep; `build/README.md` |
+| Tests | `engine.test.ts` +one-to-many → **34 cases / 3 files** |
+
+Gate: `tsc` ✓ · `lint` ✓ · `test` 34/34 ✓ · `vite build` ✓ (main 942→458 kB; `xlsx`/`confetti`/worker split out).
+
+### Deferred to v0.5
+- **Manual match / unmatch** — riskiest remaining item (`__rowId` through parse/signature/
+  export/session, cross-tab selection, results re-derivation); wants a focused pass with
+  runtime verification.
+- `Toast` queue provider · full modal focus-trap · `ErrorBoundary` state persistence.
+- `build/icon.png` + `electron-updater` (needs a release feed).
+- Per-session history timeline · auto-save interval editor · `useColumnDefaults`.
