@@ -1,12 +1,15 @@
 # ReconcileX — Feature Roadmap & Change Plan
 
 A feature-by-feature plan: what exists, what to change, and which new features are worth
-building next. Written against the current codebase (single commit `1dc9317`, post
-dependency upgrade).
+building next. Originally written against commit `1dc9317`.
 
-> **Progress:** v0.1–v0.4 are implemented (v0.4 = "Scale & ship", minus manual match /
-> toast queue / auto-update, deferred to v0.5). See the Implementation log at the bottom.
-> Rows are marked ✅ when done, ⏳ when partial.
+> **Progress (as of branch `feat/v0.4-scale-and-ship`, commit `985cadc`):** v0.1–v0.4 are
+> implemented and committed one branch per version off `feat/update-features`:
+> `feat/v0.2-use-whats-built` → `feat/v0.3-matching-reality` → `feat/v0.4-scale-and-ship`.
+> Each branch passes `tsc` / `lint` / `test` / `vite build`. Remaining items (manual
+> match, `Toast` queue, auto-update, focus-trap, `ErrorBoundary` persistence) are grouped
+> into **v0.5** — see the Implementation log at the bottom. Rows are marked ✅ done,
+> ⏳ partial.
 
 ## Legend
 
@@ -65,7 +68,7 @@ dependency upgrade).
 | 3 | ✅ **Export** — Summary sheet + timestamped name (v0.2); Electron `dialog.showSaveDialog` via `export:save` IPC, browser download fallback; Group Matches sheet (v0.4). | P1 | M | Done (v0.4) |
 | 4 | ✅ **CSV** export (single flattened sheet). Per-tab export not added — the CSV/xlsx already carry `Match_Status`. | P2 | S | Done (v0.4) |
 | 5 | ✅ **"Why unmatched?"** — each unmatched row expands to show the closest row on the other side, rule-by-rule (✓/✗ with both values). | P2 | M | Done (v0.3) |
-| 6 | **Empty states** per tab instead of bare grey text; loading skeletons. | P3 | S | Partial (v0.3) |
+| 6 | ⏳ **Empty states** — every view now renders a friendly `<EmptyState>` / "No duplicate rows detected" line (v0.3). Loading skeletons still TODO (v0.5). | P3 | S | Partial (v0.3) |
 
 ### 1.5 Sessions & recovery (`useDatabase.ts`, `UploadScreen.tsx`, `ReconciliationScreen.tsx`)
 
@@ -93,7 +96,7 @@ dependency upgrade).
 | **`src/types/database.d.ts`** stale comment in `DatabaseContext.tsx` | ✅ Comment corrected (v0.2) |
 | **No tests** despite `reconcile.ts` being pure | ✅ Vitest + `reconcile.test.ts` (14 cases) (v0.1 / v0.2) |
 | **`index.html`** title / favicon | ✅ `ReconcileX` + `public/reconcilex.svg` (v0.1) |
-| **`electron-builder.json5`** placeholders | ⏳ v0.4 packaging |
+| **`electron-builder.json5`** placeholders | ⏳ real `appId` / `productName` / `buildResources` / `npmRebuild` set (v0.4); `build/icon.png` still needed |
 
 ---
 
@@ -119,13 +122,17 @@ a day, or formatting landed in "Unmatched".
 | B. Per-rule tolerance | Each rule gets a mode: numeric `exact / ±amount / ±%`; date `exact / ±N days`; text `exact / normalized / contains / alphanumeric-only` | ✅ **Recommended.** Fits the existing rule UI, incremental to build |
 | C. Scoring model | Weight every rule, accept pairs above a threshold, rank candidates | Powerful but a bigger UX + tuning problem; do as a later evolution of B |
 
-**Recommended build:** Option **B**, delivered as a **two-pass engine** — pass 1 strict
-(unchanged), pass 2 runs tolerance rules over the leftovers and labels those pairs
-"fuzzy — needs review" (distinct colour in `ResultsTable`, counted separately). Extend
-`comparisonMode` on `MappingRule` into `{ type, tolerance }`. Depends on 1.1.7 (worker)
-for large files.
+**How it was built:** Option **B**, as a two-pass engine — pass 1 strict, pass 2 tolerant
+over the leftovers, fuzzy pairs badged and counted separately. `MappingRule` kept
+`comparisonMode` and gained an optional `tolerance` (rather than the `{ type, tolerance }`
+reshape originally sketched). Runs in the Worker (1.1.7).
 
-### 2.2 Manual match / unmatch  ·  **P1 · Effort M**
+### 2.2 Manual match / unmatch  ·  **P1 · Effort M · ⏳ DEFERRED → v0.5**
+
+Not started. It's the riskiest remaining item — a synthetic `__rowId` has to thread
+through parse → signature (excluded) → export → session storage, plus cross-tab selection
+state and re-derived results — and it can't be verified without running the app. The
+export code already emits a distinct `MATCHED (MANUAL)` status for when it lands.
 
 **Problem:** even with fuzzy matching there's always a residue only a human can pair.
 
@@ -147,14 +154,8 @@ single "resume" banner.
 
 **Shipped:** `/history` route — session list (date, files, match %, counts), reopen in
 read-only "review" mode, delete, match-rate sparkline, cap-based auto-prune (Settings).
-Per-session event *timeline* (from `getSessionHistory`) is available via
-`getSessionHistoryAsync` but not yet surfaced in the UI.
-
-**Build:** a `/history` route listing sessions from `getAllSessions` (date, files, match
-rate, row counts). Row actions: **reopen** (load saved results into `ReconciliationScreen`
-read-only), **delete**, **export**. Add a small match-rate trend chart across runs. This
-is where the dead `history` table earns its place — log `session_start` /
-`session_complete` / `rule_save` events and show them as a per-session timeline.
+`session_start` / `session_complete` events are logged. Per-session event *timeline* (from
+`getSessionHistory`) has a data path via `getSessionHistoryAsync` but no UI yet → v0.5.
 
 ### 2.4 Settings screen  ·  **P1 · Effort M · ✅ DONE (v0.2)**
 
@@ -180,18 +181,23 @@ agree). Both directions. Skipped above `GROUP_LEFTOVER_CAP` leftovers. Rendered 
 `useFileParser.inspectSheets()` lists sheet names; a `<select>` appears per file when a
 workbook has more than one. A "Header is on row N" input feeds `sheet_to_json`'s `range`.
 
-### 2.8 Test suite  ·  **P1 · ✅ STARTED (v0.1 / v0.2)**
+### 2.8 Test suite  ·  **P1 · ✅ STARTED (v0.1 → v0.4)**
 
-Vitest (`vitest.config.ts`, standalone). `src/utils/reconcile.test.ts` — 14 cases:
-`normalizeNumeric`, exact / zero / sub-cent match, signature format & collisions,
-`describeRow`. Engine-level and component tests still to come.
+Vitest (`vitest.config.ts`, standalone). **34 cases across 3 files:**
+- `reconcile.test.ts` — `normalizeNumeric`, `parseDateMs`, exact / zero / sub-cent match,
+  signature format & collisions, `evaluateRule` tolerances, `describeRow`.
+- `mapping.test.ts` — `headerSimilarity`, `guessComparisonMode`, `suggestMappings`.
+- `engine.test.ts` — exact pass, `all-unmatched` strategy, fuzzy pass (amount / date),
+  one-to-many pass 3.
 
-### 2.9 Explainability / onboarding  ·  **P1 · Effort S–M**
+Still to come: hook/component tests (React Testing Library).
 
-- First-run welcome card: the 3 steps in one sentence each.
-- Results legend: "Unmatched in Bank = in your bank file, no equivalent found in ERP."
-- Tooltips from 1.2.6.
-- A "How matching works" help panel (strict → fuzzy → groups).
+### 2.9 Explainability / onboarding  ·  **P1 · Effort S–M · ⏳ PARTIAL**
+
+- ✅ Tooltips on "MUST EQUAL" / "Compare As" (`<InfoTip>`, v0.2).
+- ✅ Results subtitle spells out matched / fuzzy / grouped / bank-only / ERP-only counts (v0.3–v0.4).
+- ✅ Duplicate banner explains the 1-to-1 rule in plain terms (v0.2).
+- ⏳ First-run welcome card; a "How matching works" panel (strict → fuzzy → groups) → v0.5.
 
 ### 2.10 Packaging & distribution  ·  **⏳ Partial (v0.4)**
 
@@ -248,23 +254,19 @@ focus-trap · `ErrorBoundary` state persistence · live "matched X/Y" from the w
 
 ---
 
-## Open product decisions (need your call)
+## Open product decisions — resolved
 
-1. **Fuzzy matching UX** — per-rule tolerance controls (recommended) vs. a single global
-   "strictness" slider. Per-rule is more powerful but more UI.
-2. **Duplicate default** — keep first-wins, or default to "push all copies to Unmatched
-   for review"? Safer vs. higher headline match rate.
-3. **History retention** — keep every session forever, cap at N, or auto-prune after X
-   days? Affects the `sessions` / `history` tables and the Settings UI.
-4. **Manual matches in export** — mark them visually distinct from engine matches in the
-   workbook, or merge them into "Matched"?
-5. **Target scale** — realistic max row count per file? Decides whether the Web Worker
-   (2.1 dependency) is v0.3 or can wait.
+All five went with the recommended default; each is reversible:
 
-**Defaults chosen so far** (change any of these): fuzzy UX = per-rule tolerance;
-duplicate default = `first-wins` (switchable in Settings); history retention = cap 100,
-auto-prune oldest; manual matches in export = TBD (v0.3); target scale assumed ≤ ~100k
-rows/file → Web Worker planned for v0.3.
+1. **Fuzzy matching UX** → per-rule tolerance (`RuleTolerance` on each rule), not a global slider.
+2. **Duplicate default** → `first-wins`, switchable to `all-unmatched` in Settings.
+3. **History retention** → cap of 100 (editable in Settings), auto-prune oldest first.
+4. **Manual matches in export** → distinct: `Match_Status` = `MATCHED (MANUAL)` / `MATCHED (FUZZY)` / `GROUP …`.
+5. **Target scale** → assumed ≤ ~100k rows/file; matching runs in a Web Worker (shipped v0.3).
+
+Still genuinely open for v0.5:
+- Manual-match interaction: checkbox-select (planned) vs. drag-and-drop.
+- Whether to persist manual matches to the session DB or keep them per-view.
 
 ---
 
