@@ -6,16 +6,38 @@ import { StepIndicator } from '../components/StepIndicator';
 import { useFileParser } from '../hooks/useFileParser';
 import { useSessionRecovery } from '../hooks/useDatabase';
 import { motion } from 'framer-motion';
-import { ArrowRight, Database, CheckCircle2, RotateCcw } from 'lucide-react';
+import { ArrowRight, Database, CheckCircle2, RotateCcw, SlidersHorizontal } from 'lucide-react';
 
 export const UploadScreen = () => {
   const navigate = useNavigate();
   const [bankFile, setBankFile] = useState<File | null>(null);
   const [erpFile, setErpFile] = useState<File | null>(null);
+  const [headerRow, setHeaderRow] = useState(1);
+  const [bankSheets, setBankSheets] = useState<string[]>([]);
+  const [erpSheets, setErpSheets] = useState<string[]>([]);
+  const [bankSheet, setBankSheet] = useState<string | undefined>();
+  const [erpSheet, setErpSheet] = useState<string | undefined>();
   const [toast, setToast] = useState<{ show: boolean; msg: string; type: 'error' | 'success' }>({ show: false, msg: '', type: 'error' });
-  
-  const { isProcessing, error, parsedData, processFiles, reset } = useFileParser();
+
+  const { isProcessing, error, parsedData, processFiles, inspectSheets, reset } = useFileParser();
   const { lastSession, hasRecoverySession } = useSessionRecovery();
+
+  const pickBank = async (f: File) => {
+    setBankFile(f);
+    try {
+      const names = await inspectSheets(f);
+      setBankSheets(names);
+      setBankSheet(names[0]);
+    } catch { setBankSheets([]); }
+  };
+  const pickErp = async (f: File) => {
+    setErpFile(f);
+    try {
+      const names = await inspectSheets(f);
+      setErpSheets(names);
+      setErpSheet(names[0]);
+    } catch { setErpSheets([]); }
+  };
 
   // Surface errors emitted by the parser hook.
   useEffect(() => {
@@ -117,33 +139,68 @@ export const UploadScreen = () => {
           <div className="grid md:grid-cols-2 gap-8">
             <div className="space-y-2">
               <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">Step 1: Bank Data</h2>
-              <FileDropzone 
+              <FileDropzone
                 title="Bank Statement"
                 description="Drop your bank XLS/CSV here or click to browse"
                 selectedFile={bankFile}
-                onFileDrop={setBankFile}
-                onClear={() => { setBankFile(null); reset(); }}
+                onFileDrop={pickBank}
+                onClear={() => { setBankFile(null); setBankSheets([]); reset(); }}
                 onError={(msg) => setToast({ show: true, msg, type: 'error' })}
               />
+              {bankSheets.length > 1 && (
+                <select
+                  value={bankSheet}
+                  onChange={e => setBankSheet(e.target.value)}
+                  className="w-full text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2"
+                >
+                  {bankSheets.map(s => <option key={s} value={s}>Sheet: {s}</option>)}
+                </select>
+              )}
             </div>
-            
+
             <div className="space-y-2">
               <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">Step 2: ERP Data</h2>
-              <FileDropzone 
+              <FileDropzone
                 title="ERP Statement"
                 description="Drop your ERP XLS/CSV here or click to browse"
                 selectedFile={erpFile}
-                onFileDrop={setErpFile}
-                onClear={() => { setErpFile(null); reset(); }}
+                onFileDrop={pickErp}
+                onClear={() => { setErpFile(null); setErpSheets([]); reset(); }}
                 onError={(msg) => setToast({ show: true, msg, type: 'error' })}
               />
+              {erpSheets.length > 1 && (
+                <select
+                  value={erpSheet}
+                  onChange={e => setErpSheet(e.target.value)}
+                  className="w-full text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2"
+                >
+                  {erpSheets.map(s => <option key={s} value={s}>Sheet: {s}</option>)}
+                </select>
+              )}
             </div>
           </div>
+
+          {!parsedData && (bankFile || erpFile) && (
+            <div className="mt-6 flex items-center justify-center gap-3 text-sm text-slate-600 dark:text-slate-400">
+              <SlidersHorizontal className="w-4 h-4" />
+              <label htmlFor="headerRow">Header is on row</label>
+              <input
+                id="headerRow"
+                type="number"
+                min={1}
+                max={50}
+                value={headerRow}
+                onChange={e => setHeaderRow(Math.max(1, Number(e.target.value) || 1))}
+                className="w-16 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1"
+              />
+              <span className="text-slate-400">(rows above are skipped)</span>
+            </div>
+          )}
 
           <div className="mt-10 flex flex-col items-center border-t border-slate-100 dark:border-slate-700 pt-8">
             {!parsedData ? (
               <button
-                onClick={() => processFiles(bankFile, erpFile)}
+                onClick={() => processFiles(bankFile, erpFile, { headerRow, bankSheet, erpSheet })}
                 disabled={!bankFile || !erpFile || isProcessing}
                 className={`
                   flex items-center space-x-2 px-8 py-3 rounded-full font-medium transition-all duration-200
