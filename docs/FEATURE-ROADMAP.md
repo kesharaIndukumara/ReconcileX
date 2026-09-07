@@ -4,8 +4,8 @@ A feature-by-feature plan: what exists, what to change, and which new features a
 building next. Written against the current codebase (single commit `1dc9317`, post
 dependency upgrade).
 
-> **Progress:** v0.1 ("Honest & polished") and v0.2 ("Use what's already built") are
-> implemented — see the Implementation log at the bottom. Rows below are marked ✅ when done.
+> **Progress:** v0.1, v0.2 and **v0.3 ("Matching that matches reality")** are implemented —
+> see the Implementation log at the bottom. Rows below are marked ✅ when done.
 
 ## Legend
 
@@ -31,10 +31,10 @@ dependency upgrade).
 | 2 | ✅ **`getRowSignature` `\|\| ''` → `?? ''`** — a real `0` is preserved. Regression test added. | P0 | S | Done |
 | 3 | ✅ **Signature now `JSON.stringify(parts)`** — no cross-field collisions. | P1 | S | Done |
 | 4 | ✅ **Match rate is both-sided.** `progress` is now the combined rate; `bankMatchRate` / `erpMatchRate` added to results and shown as "Bank x% · ERP y%" on the badge. | P1 | S | Done |
-| 5 | **`evaluateMatch` is dead code.** Either delete it or (better) reuse it for the "why didn't this row match?" explainer (see 2.4 / 3.9). | P2 | S | Kept — will power "why unmatched?" in v0.3 |
-| 6 | ✅ **Artificial delays trimmed** (start 300→150 ms, per-chunk 5→0 ms, tail 500→400 ms; chunk size 200→500). | P2 | S | Done (v0.2) |
-| 7 | **Move matching into a Web Worker.** Main-thread chunking still blocks paint on 100k rows. A worker makes "massive spreadsheets" real and lets the progress bar be honest. | P2 | M | Enables 1.6, 3.7 |
-| 8 | **Cancel button.** The engine already has an `isMounted` flag — expose a user abort from `ProcessingOverlay`. | P2 | S | |
+| 5 | ✅ **`evaluateMatch` reused** — now honours tolerances and powers `explainMatch` / `nearestCandidate` ("why unmatched?"). | P2 | S | Done (v0.3) |
+| 6 | ✅ **Artificial delays trimmed** (v0.2), then removed entirely — matching runs in a Worker (v0.3). | P2 | S | Done |
+| 7 | ✅ **Web Worker** — `src/workers/reconcile.worker.ts` runs the pure `runReconciliation` engine off-thread; main-thread fallback if `Worker` fails. | P2 | M | Done (v0.3) |
+| 8 | ✅ **Cancel button** — `useReconciliation.cancel()` terminates the worker; `ProcessingOverlay` shows Cancel + elapsed time. | P2 | S | Done (v0.3) |
 
 ### 1.2 Rule mapping (`src/pages/MappingScreen.tsx`)
 
@@ -42,8 +42,8 @@ dependency upgrade).
 |---|--------|----------|--------|-------|
 | 1 | ✅ **`alert()` replaced with `Toast`** in `handleStartReconciliation`. | P0 | S | Done (v0.1) |
 | 2 | ✅ **Rule validation** — half-filled rows are highlighted amber and listed in a "Check your rules" panel; duplicate Bank/ERP column use is flagged. | P1 | S | Done (v0.2) |
-| 3 | **Data preview.** Show 3–5 sample rows per side above the rule builder so users map against real values, not just header names. | P1 | M | v0.3 (with 1.2.4) |
-| 4 | **Auto-suggest mappings** by fuzzy header match (`"Txn Date"`↔`"Date"`, `"Amt"`↔`"Amount"`). Pre-fill rules, let the user correct. | P1 | M | v0.3 |
+| 3 | ✅ **Data preview** — first 4 rows of each side shown above the rule builder. | P1 | M | Done (v0.3) |
+| 4 | ✅ **Auto-suggest** — "Suggest mappings" button; `suggestMappings` pairs headers by similarity, guesses `date`/`numeric`/`text`. | P1 | M | Done (v0.3) |
 | 5 | ✅ **Template manager** — Manage modal with load / rename / duplicate / delete; `getLastUsedTemplate` auto-loads on a pristine rule list; loading a template records it as last-used. New `updateRuleAsync` wired through context. | P1 | M | Done (v0.2) |
 | 6 | ✅ **Vocabulary tooltips** — `<InfoTip>` on "MUST EQUAL" and "Compare As" (Text vs Numeric). | P1 | S | Done (v0.2) |
 
@@ -63,15 +63,15 @@ dependency upgrade).
 | 2 | **Results table caps at 100 rows** with no way to see the rest in-app. Add search + column sort + virtualized scroll or pagination. | P1 | M | v0.4 |
 | 3 | ⏳ **Export** — **Summary sheet** and timestamped filename done (v0.2). Electron `dialog.showSaveDialog` still pending. | P1 | M | Partial (v0.2) → save dialog v0.4 |
 | 4 | **Per-tab export** and a **CSV** option. | P2 | S | v0.4 |
-| 5 | **"Why unmatched?"** per row — run `evaluateMatch` against the nearest candidate and show which rule failed. | P2 | M | v0.3 |
-| 6 | **Empty states** per tab instead of bare grey text; loading skeletons. | P3 | S | |
+| 5 | ✅ **"Why unmatched?"** — each unmatched row expands to show the closest row on the other side, rule-by-rule (✓/✗ with both values). | P2 | M | Done (v0.3) |
+| 6 | **Empty states** per tab instead of bare grey text; loading skeletons. | P3 | S | Partial (v0.3) |
 
 ### 1.5 Sessions & recovery (`useDatabase.ts`, `UploadScreen.tsx`, `ReconciliationScreen.tsx`)
 
 | # | Change | Priority | Effort | Notes |
 |---|--------|----------|--------|-------|
 | 1 | ✅ **Banner reworded** to "Continue last reconciliation" (v0.1). Session row is created `isActive:true` at run start, `false` on completion; `session_start` / `session_complete` events logged. Precise crash detection still coarse. | P0 | S | Done (v0.1 / v0.2) |
-| 2 | **Resume loses earlier `matchedPairs`.** `handleResumeSession` feeds only `unmatchedBank/ERP` back as new input. Carry forward prior matches. | P1 | M | v0.3 |
+| 2 | ✅ **Resume carries forward matches** — `seedMatched` is passed through and folded into the resumed run's totals and match rate. | P1 | M | Done (v0.3) |
 | 3 | ✅ **`setToast` during render → `useEffect([error])`** in `UploadScreen`. | P1 | S | Done (v0.1) |
 | 4 | ✅ **Session list** — `/history` browser reads `getAllSessions`; reopen / delete / sparkline / auto-prune. | P1 | — | Done (v0.2) |
 
@@ -98,11 +98,17 @@ dependency upgrade).
 
 ## Part 2 — New features (options + recommendation)
 
-### 2.1 Tolerance / fuzzy matching  ·  **P1 · Effort L · highest product value**
+### 2.1 Tolerance / fuzzy matching  ·  **P1 · Effort L · ✅ DONE (v0.3)**
 
-**Problem:** matching is exact-only. Real bank vs ERP data differs by rounding, dates
-off by a day, sign conventions, and reference numbers buried in memo text — so genuine
-matches land in "Unmatched" and users reconcile them by hand anyway.
+**Shipped:** per-rule `tolerance` on `MappingRule` — numeric `amount`/`percent`, date
+`days`, text `normalized`/`contains`/`alnum`; `comparisonMode` gains `date`. Two-pass
+engine (`src/utils/engine.ts`): pass 1 exact bucket, pass 2 tolerant brute-force over the
+leftovers (capped at `FUZZY_CAP` comparisons → `fuzzySkipped` flag otherwise). Fuzzy
+pairs carry `kind: 'fuzzy'`, render with an amber ✨ badge, and are counted separately.
+The Tolerance row in `MappingScreen` configures it.
+
+**Original problem:** matching was exact-only — genuine matches that differed by rounding,
+a day, or formatting landed in "Unmatched".
 
 **Options**
 
@@ -155,12 +161,11 @@ is where the dead `history` table earns its place — log `session_start` /
 strategy, auto-save on/off, history cap, Compact database, Clear history, Factory reset.
 Not yet: auto-save *interval* editor, `useColumnDefaults` defaults.
 
-### 2.5 Column auto-mapping + preview  ·  **P1 · Effort M**
+### 2.5 Column auto-mapping + preview  ·  **P1 · Effort M · ✅ DONE (v0.3)**
 
-Covered in 1.2.3 + 1.2.4. Grouped here because together they're a single "smart mapping"
-feature: show sample data, auto-propose rules by header similarity + value-shape
-detection (looks numeric / looks like a date), user confirms. Biggest reduction in
-time-to-first-result for a new user.
+Data preview (first 4 rows/side) + "Suggest mappings" (`src/utils/mapping.ts`:
+`headerSimilarity`, `guessComparisonMode`, `suggestMappings`). Value-shape detection
+(sampling actual cell values, not just headers) could still improve the mode guess.
 
 ### 2.6 One-to-many matching  ·  **P2 · Effort L**
 
@@ -208,7 +213,7 @@ packaged app / `npm run dev`); `electron-updater` for auto-update; app icon set.
 |---|--------|----------|--------|--------|
 | 1 | Real dark mode + toggle and dark-aware `Toast` | P0 | S | ✅ v0.1 |
 | 2 | One feedback system: no `alert()`, a `Toast` **queue** so rapid errors don't overwrite | P1 | S | `alert()` gone (v0.1); queue → v0.4 |
-| 3 | `ProcessingOverlay`: show "matched 8,240 / 12,000 rows" + elapsed time + Cancel | P1 | S | v0.3 (with Web Worker) |
+| 3 | `ProcessingOverlay`: % + **elapsed time + Cancel** shipped (v0.3). Live "matched X / Y" counter not yet streamed from the worker. | P1 | S | Partial (v0.3) |
 | 4 | Accessibility: `aria-*` on tabs, keyboard `FileDropzone`, focus trap + `Esc` in modals | P1 | M | `aria-pressed` on tabs (v0.2); rest → v0.4 |
 | 5 | `ErrorBoundary` "Return to Start" wipes parsed data — confirm / persist | P2 | M | v0.4 |
 | 6 | Consistent number formatting in tables and stat cards | P3 | S | v0.4 |
@@ -228,14 +233,15 @@ Template manager UI · reconciliation history browser · Settings screen · dupl
 duplicate strategy · rule validation · vocabulary tooltips · export summary sheet ·
 history logging + DB maintenance wired · trimmed processing delays.
 
-### v0.3 — "Matching that matches reality" — next
-Per-rule tolerance + two-pass engine · Web Worker · manual match/unmatch · "why unmatched?" ·
-data preview + auto-suggest mappings · resume carries forward matches · Cancel button.
+### v0.3 — "Matching that matches reality" — ✅ DONE
+Per-rule tolerance + two-pass engine · Web Worker + Cancel · "why unmatched?" ·
+data preview + auto-suggest mappings · resume carries forward matches · `date` mode.
+(Deferred: **manual match/unmatch** → v0.4.)
 
-### v0.4 — "Scale & ship"
-Virtualized results + search/sort · export save-dialog + CSV · one-to-many group matching ·
-sheet/header controls · Toast queue · a11y pass · lazy-load `xlsx`/`confetti` ·
-packaging (rebuild, updater, icon, appId).
+### v0.4 — "Scale & ship" — next
+Manual match/unmatch (checkbox model) · virtualized results + search/sort ·
+export save-dialog + CSV · one-to-many group matching · sheet/header controls ·
+Toast queue · a11y pass · lazy-load `xlsx`/`confetti` · packaging (rebuild, updater, icon, appId).
 
 ---
 
@@ -285,8 +291,22 @@ Branch `feat/v0.2-use-whats-built` off `feat/update-features`.
 
 Gate: `tsc` ✓ · `lint` ✓ · `test` 14/14 ✓ · `vite build` ✓.
 
-### Deferred from v0.2 → later
-- Per-session event *timeline* UI (data path via `getSessionHistoryAsync` exists).
-- Auto-save *interval* editor; `useColumnDefaults`.
-- Export **save dialog** (needs an Electron IPC channel) — v0.4.
-- Drag-and-drop is not used anywhere yet; manual match/unmatch is v0.3 (checkbox model).
+### v0.3 — "Matching that matches reality"
+Branch `feat/v0.3-matching-reality` off `feat/v0.2-use-whats-built`.
+
+| Area | Files |
+|------|-------|
+| Types | `RuleTolerance`, `ComparisonMode` (+`date`), `MatchKind`, `MatchedPair.kind`, `ReconciliationResults.fuzzyCount`/`fuzzySkipped` |
+| Engine | `src/utils/engine.ts` (new) — pure two-pass `runReconciliation`; `src/workers/reconcile.worker.ts` (new); `reconcile.ts` — `evaluateRule` (tolerant), `parseDateMs`, `explainMatch`, `nearestCandidate` |
+| Mapping helpers | `src/utils/mapping.ts` (new) — `headerSimilarity`, `guessComparisonMode`, `suggestMappings` |
+| Hook | `useReconciliation.ts` rewritten — spawns the worker, `elapsedMs`, `cancel()`, main-thread fallback |
+| Components | `ProcessingOverlay` (elapsed + Cancel); `ResultsTable` split into `DuplicatesView` / `MatchedView` (fuzzy badge) / `UnmatchedView` ("Why?" explainer) |
+| Pages | `MappingScreen` (data preview, Suggest button, Tolerance row, `date` option); `ReconciliationScreen` (worker wiring, cancel→back, `seedMatched` fold-in, fuzzy count / skipped note); `UploadScreen` (resume passes `seedMatched`); `HistoryScreen` (`toResults` fills new fields) |
+| Tests | `mapping.test.ts` (new), `engine.test.ts` (new), `reconcile.test.ts` +tolerance/date → **32 cases across 3 files** |
+
+Gate: `tsc` ✓ · `lint` ✓ · `test` 32/32 ✓ · `vite build` ✓ (worker emitted as its own chunk).
+
+### Deferred to v0.4
+- **Manual match / unmatch** (checkbox model; needs stable `__rowId` at parse time).
+- Per-session event *timeline* UI; auto-save *interval* editor; `useColumnDefaults`.
+- Export **save dialog** (Electron IPC); live "matched X / Y" counter from the worker.

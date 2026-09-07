@@ -36,8 +36,9 @@ export const UploadScreen = () => {
 
   const handleResumeSession = () => {
     if (lastSession) {
-      // Navigate to reconciliation with the saved session data
-      navigate('/reconciliation', { 
+      // Resume from the leftovers, but carry the matches already found so the
+      // resumed run reports the whole reconciliation, not just this pass.
+      navigate('/reconciliation', {
         state: {
           parsedData: {
             bankData: lastSession.unmatchedBank,
@@ -46,7 +47,8 @@ export const UploadScreen = () => {
           rules: lastSession.rules,
           bankFileName: lastSession.bankFileName,
           erpFileName: lastSession.erpFileName,
-        }
+          seedMatched: lastSession.matchedPairs,
+        },
       });
     }
   };
