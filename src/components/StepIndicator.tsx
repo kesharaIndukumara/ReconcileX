@@ -1,4 +1,6 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Clock, Settings } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 
 interface StepIndicatorProps {
@@ -6,6 +8,7 @@ interface StepIndicatorProps {
 }
 
 export const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep }) => {
+  const navigate = useNavigate();
   const steps = [
     { num: 1, label: 'Upload' },
     { num: 2, label: 'Map' },
@@ -34,7 +37,28 @@ export const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep }) => 
           </React.Fragment>
         ))}
       </div>
-      <ThemeToggle className="absolute right-4 top-1/2 -translate-y-1/2" />
+
+      <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => navigate('/history')}
+          aria-label="Reconciliation history"
+          title="Reconciliation history"
+          className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors"
+        >
+          <Clock className="w-5 h-5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/settings')}
+          aria-label="Settings"
+          title="Settings"
+          className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800 transition-colors"
+        >
+          <Settings className="w-5 h-5" />
+        </button>
+        <ThemeToggle />
+      </div>
     </div>
   );
 };

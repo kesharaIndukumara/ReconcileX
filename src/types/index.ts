@@ -36,6 +36,24 @@ export interface ReconciliationResults {
   erpMatchRate: number;
 }
 
+/** How to treat rows that share a mapping signature within one side. */
+export type DuplicateStrategy = 'first-wins' | 'all-unmatched';
+
+/** A set of rows on one side that share the same mapping signature. */
+export interface DuplicateGroup {
+  side: 'bank' | 'erp';
+  /** Human-readable rendering of the shared key values. */
+  label: string;
+  rows: TransactionRow[];
+}
+
+export interface DuplicateSummary {
+  /** Number of signatures that occur more than once. */
+  groups: number;
+  /** Rows beyond the first in each group (the "extra copies"). */
+  extras: number;
+}
+
 // ============ DATABASE TYPES ============
 
 export interface SavedRule {
@@ -62,8 +80,24 @@ export interface ReconciliationSession {
   updatedAt: Date;
 }
 
+export type HistoryEventType =
+  | 'session_start'
+  | 'session_save'
+  | 'session_complete'
+  | 'rule_save'
+  | 'preference_update';
+
 export interface HistoryEvent {
   sessionId?: string;
-  eventType: 'session_start' | 'session_save' | 'session_complete' | 'rule_save' | 'preference_update';
+  eventType: HistoryEventType;
   eventData: Record<string, unknown>;
+}
+
+/** A persisted history row as returned by the database. */
+export interface HistoryRecord {
+  id: number;
+  sessionId?: string;
+  eventType: HistoryEventType;
+  eventData: Record<string, unknown>;
+  timestamp: string | Date;
 }

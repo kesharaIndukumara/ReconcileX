@@ -79,6 +79,10 @@ const db = {
     ipcRenderer.invoke('db:vacuum'),
   optimize: () =>
     ipcRenderer.invoke('db:optimize'),
+  clearHistory: () =>
+    ipcRenderer.invoke('db:clearHistory'),
+  resetDatabase: () =>
+    ipcRenderer.invoke('db:resetDatabase'),
 }
 
 contextBridge.exposeInMainWorld('db', db)

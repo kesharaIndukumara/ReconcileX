@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { SavedRule, ReconciliationSession, MappingRule } from '../types';
+import { SavedRule, ReconciliationSession, MappingRule, HistoryEvent, HistoryRecord } from '../types';
 
-// Helper function to safely access window.db (typed via src/types/database.d.ts)
+// Safely access window.db (the DatabaseAPI type is declared in electron/electron-env.d.ts).
 function getDb(): DatabaseAPI | null {
   if (typeof window === 'undefined') return null;
   return window.db || null;
@@ -13,6 +13,7 @@ interface DatabaseContextType {
   loadingSavedRules: boolean;
   refreshRules: () => Promise<void>;
   saveNewRule: (rules: MappingRule[], name: string, description?: string) => Promise<string | null>;
+  updateRuleAsync: (ruleId: string, name: string, description?: string, rules?: MappingRule[]) => Promise<boolean>;
   deleteRuleAsync: (ruleId: string) => Promise<boolean>;
   duplicateRuleAsync: (sourceRuleId: string, newName: string) => Promise<string | null>;
 
@@ -30,6 +31,16 @@ interface DatabaseContextType {
   preferences: Record<string, unknown>;
   savePreferenceAsync: (key: string, value: unknown) => Promise<boolean>;
   deletePreferenceAsync: (key: string) => Promise<boolean>;
+
+  // History log
+  logEvent: (event: HistoryEvent) => Promise<void>;
+  getSessionHistoryAsync: (sessionId: string) => Promise<HistoryRecord[]>;
+
+  // Maintenance
+  vacuumAsync: () => Promise<boolean>;
+  optimizeAsync: () => Promise<boolean>;
+  clearHistoryAsync: () => Promise<boolean>;
+  factoryResetAsync: () => Promise<boolean>;
 
   // Error handling
   error: string | null;
@@ -95,6 +106,25 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const errorMsg = (err as Error)?.message || 'Unknown error saving rule';
       handleError(errorMsg);
       return null;
+    }
+  }, [refreshRules, handleError]);
+
+  const updateRuleAsync = useCallback(async (
+    ruleId: string, name: string, description?: string, rules?: MappingRule[]
+  ) => {
+    const db = getDb();
+    if (!db) return false;
+    try {
+      const result = await db.updateRule(ruleId, name, description, rules) as { success?: boolean; error?: string } | void;
+      if (!result || !('error' in result)) {
+        await refreshRules();
+        return true;
+      }
+      handleError(result.error || 'Failed to update rule');
+      return false;
+    } catch (err) {
+      handleError(`Failed to update rule: ${(err as Error).message}`);
+      return false;
     }
   }, [refreshRules, handleError]);
 
@@ -278,6 +308,77 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [handleError]);
 
+  // ============ HISTORY LOG ============
+
+  const logEvent = useCallback(async (event: HistoryEvent) => {
+    const db = getDb();
+    if (!db) return;
+    try {
+      await db.logHistory(event);
+    } catch {
+      // History logging is best-effort; never block the UI on it.
+    }
+  }, []);
+
+  const getSessionHistoryAsync = useCallback(async (sessionId: string): Promise<HistoryRecord[]> => {
+    const db = getDb();
+    if (!db) return [];
+    try {
+      const result = await db.getSessionHistory(sessionId);
+      return Array.isArray(result) ? (result as HistoryRecord[]) : [];
+    } catch {
+      return [];
+    }
+  }, []);
+
+  // ============ MAINTENANCE ============
+
+  const runMaintenance = useCallback(async (
+    op: () => Promise<unknown>, label: string
+  ): Promise<boolean> => {
+    const db = getDb();
+    if (!db) return false;
+    try {
+      const result = await op() as { success?: boolean; error?: string } | void;
+      if (!result || !('error' in result)) return true;
+      handleError(result.error || `Failed to ${label}`);
+      return false;
+    } catch (err) {
+      handleError(`Failed to ${label}: ${(err as Error).message}`);
+      return false;
+    }
+  }, [handleError]);
+
+  const vacuumAsync = useCallback(() => {
+    const db = getDb();
+    return runMaintenance(() => db!.vacuum(), 'compact database');
+  }, [runMaintenance]);
+
+  const optimizeAsync = useCallback(() => {
+    const db = getDb();
+    return runMaintenance(() => db!.optimize(), 'optimize database');
+  }, [runMaintenance]);
+
+  const clearHistoryAsync = useCallback(async () => {
+    const db = getDb();
+    if (!db) return false;
+    const ok = await runMaintenance(() => db.clearHistory(), 'clear history');
+    if (ok) await refreshSessions();
+    return ok;
+  }, [runMaintenance, refreshSessions]);
+
+  const factoryResetAsync = useCallback(async () => {
+    const db = getDb();
+    if (!db) return false;
+    const ok = await runMaintenance(() => db.resetDatabase(), 'reset database');
+    if (ok) {
+      await refreshRules();
+      await refreshSessions();
+      setPreferences({});
+    }
+    return ok;
+  }, [runMaintenance, refreshRules, refreshSessions]);
+
   // Load initial data - only when window.db is truly available
   useEffect(() => {
     const db = getDb();
@@ -307,6 +408,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     loadingSavedRules,
     refreshRules,
     saveNewRule,
+    updateRuleAsync,
     deleteRuleAsync,
     duplicateRuleAsync,
 
@@ -324,6 +426,16 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     preferences,
     savePreferenceAsync,
     deletePreferenceAsync,
+
+    // History log
+    logEvent,
+    getSessionHistoryAsync,
+
+    // Maintenance
+    vacuumAsync,
+    optimizeAsync,
+    clearHistoryAsync,
+    factoryResetAsync,
 
     // Error handling
     error,
