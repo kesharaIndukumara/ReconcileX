@@ -61,10 +61,15 @@ declare global {
     resetDatabase(): Promise<unknown>
   }
 
+  interface ExporterAPI {
+    save(args: { defaultName: string; base64: string; ext: string }): Promise<{ saved: boolean; path?: string; error?: string }>
+  }
+
   // Used in Renderer process, exposed in `preload.ts`
   interface Window {
     ipcRenderer: import('electron').IpcRenderer
     db: DatabaseAPI
+    exporter?: ExporterAPI
   }
 }
 

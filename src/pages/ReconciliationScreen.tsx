@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
-import * as XLSX from 'xlsx';
-import { ArrowLeft, Activity, Download, AlertTriangle, Save } from 'lucide-react';
+import { ArrowLeft, Activity, AlertTriangle, Save, FileSpreadsheet, FileText } from 'lucide-react';
+
+const Confetti = lazy(() => import('react-confetti'));
 import { ReconciliationState, ReconciliationResults, TransactionRow, DuplicateStrategy } from '../types';
 import { CONFETTI_THRESHOLD } from '../utils/constants';
 import { useReconciliation } from '../hooks/useReconciliation';
@@ -155,34 +155,74 @@ export const ReconciliationScreen = () => {
     })();
   }, [isReview, cancelled, sessionId, isProcessing, results, updateSession, logEvent]);
 
-  const handleExport = () => {
-    const wb = XLSX.utils.book_new();
-
-    const flatMatched = results.matched.map(m => ({ ...m.bank, ...m.erp, Match_Status: 'MATCHED' }));
+  const buildRows = () => {
+    const flatMatched = results.matched.map(m => ({
+      ...m.bank, ...m.erp, Match_Status: m.kind === 'fuzzy' ? 'MATCHED (FUZZY)' : m.kind === 'manual' ? 'MATCHED (MANUAL)' : 'MATCHED',
+    }));
+    const flatGroup = results.groupMatched.flatMap((g, gi) => {
+      const tag = `GROUP ${gi + 1} (${g.anchorSide.toUpperCase()} 1 to ${g.anchorSide === 'bank' ? 'ERP' : 'BANK'} ${g.group.length})`;
+      return [{ ...g.anchor, Match_Status: `${tag} - ANCHOR` }, ...g.group.map(r => ({ ...r, Match_Status: `${tag} - MEMBER` }))];
+    });
     const flatBank = results.unmatchedBank.map(b => ({ ...b, Match_Status: 'UNMATCHED - ONLY IN BANK' }));
     const flatErp = results.unmatchedERP.map(e => ({ ...e, Match_Status: 'UNMATCHED - ONLY IN ERP' }));
+    return { flatMatched, flatGroup, flatBank, flatErp };
+  };
 
-    const summaryRows = [
-      { Metric: 'Bank file', Value: state?.bankFileName ?? '' },
-      { Metric: 'ERP file', Value: state?.erpFileName ?? '' },
-      { Metric: 'Run at', Value: new Date().toLocaleString() },
-      { Metric: 'Rules', Value: state?.rules.length ?? 0 },
-      { Metric: 'Matched', Value: results.matched.length },
-      { Metric: 'Unmatched (Bank)', Value: results.unmatchedBank.length },
-      { Metric: 'Unmatched (ERP)', Value: results.unmatchedERP.length },
-      { Metric: 'Combined match rate %', Value: results.progress },
-      { Metric: 'Bank match rate %', Value: results.bankMatchRate },
-      { Metric: 'ERP match rate %', Value: results.erpMatchRate },
-      { Metric: 'Duplicate groups', Value: duplicateGroupCount },
-      { Metric: 'Duplicate extra rows', Value: duplicateCount },
-    ];
+  const summaryRows = () => [
+    { Metric: 'Bank file', Value: state?.bankFileName ?? '' },
+    { Metric: 'ERP file', Value: state?.erpFileName ?? '' },
+    { Metric: 'Run at', Value: new Date().toLocaleString() },
+    { Metric: 'Rules', Value: state?.rules.length ?? 0 },
+    { Metric: 'Matched (1-to-1)', Value: results.matched.length },
+    { Metric: 'Fuzzy matches', Value: results.fuzzyCount },
+    { Metric: 'Group matches', Value: results.groupMatched.length },
+    { Metric: 'Unmatched (Bank)', Value: results.unmatchedBank.length },
+    { Metric: 'Unmatched (ERP)', Value: results.unmatchedERP.length },
+    { Metric: 'Combined match rate %', Value: results.progress },
+    { Metric: 'Bank match rate %', Value: results.bankMatchRate },
+    { Metric: 'ERP match rate %', Value: results.erpMatchRate },
+    { Metric: 'Duplicate groups', Value: duplicateGroupCount },
+    { Metric: 'Duplicate extra rows', Value: duplicateCount },
+  ];
 
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
+  const deliver = async (base64: string, ext: 'xlsx' | 'csv') => {
+    const defaultName = `${timestampName()}.${ext}`;
+    if (window.exporter) {
+      const res = await window.exporter.save({ defaultName, base64, ext });
+      if (res.saved) setToast({ show: true, msg: `Saved to ${res.path}`, type: 'success' });
+      else if (res.error) setToast({ show: true, msg: res.error, type: 'error' });
+      return;
+    }
+    // Browser fallback: trigger a download.
+    const bin = atob(base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes]));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = defaultName;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExport = async (format: 'xlsx' | 'csv') => {
+    const XLSX = await import('xlsx');
+    const { flatMatched, flatGroup, flatBank, flatErp } = buildRows();
+
+    if (format === 'csv') {
+      const all = [...flatMatched, ...flatGroup, ...flatBank, ...flatErp];
+      const ws = XLSX.utils.json_to_sheet(all as TransactionRow[]);
+      await deliver(btoa(unescape(encodeURIComponent(XLSX.utils.sheet_to_csv(ws)))), 'csv');
+      return;
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows()), 'Summary');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flatMatched as TransactionRow[]), 'Matched');
+    if (flatGroup.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flatGroup as TransactionRow[]), 'Group Matches');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flatBank as TransactionRow[]), 'Unmatched Bank');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flatErp as TransactionRow[]), 'Unmatched ERP');
-
-    XLSX.writeFile(wb, `${timestampName()}.xlsx`);
+    await deliver(XLSX.write(wb, { type: 'base64', bookType: 'xlsx' }), 'xlsx');
   };
 
   const handleSaveSession = async () => {
@@ -214,7 +254,9 @@ export const ReconciliationScreen = () => {
     return <ProcessingOverlay progress={processingProgress} elapsedMs={elapsedMs} onCancel={cancel} />;
   }
 
-  const processedCount = results.matched.length + results.unmatchedBank.length + results.unmatchedERP.length;
+  const groupedRowCount = results.groupMatched.reduce((n, g) => n + 1 + g.group.length, 0);
+  const processedCount =
+    results.matched.length + groupedRowCount + results.unmatchedBank.length + results.unmatchedERP.length;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 overflow-hidden flex flex-col items-center">
@@ -227,7 +269,9 @@ export const ReconciliationScreen = () => {
       />
 
       {!isReview && confettiEnabled && results.progress >= CONFETTI_THRESHOLD && (
-        <Confetti width={width} height={height} recycle={false} numberOfPieces={500} />
+        <Suspense fallback={null}>
+          <Confetti width={width} height={height} recycle={false} numberOfPieces={500} />
+        </Suspense>
       )}
 
       <div className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-6 shadow-sm z-10 w-full">
@@ -252,11 +296,18 @@ export const ReconciliationScreen = () => {
                 </button>
               )}
               <button
-                onClick={handleExport}
+                onClick={() => handleExport('xlsx')}
                 className="flex items-center px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm"
               >
-                <Download className="w-4 h-4 mr-2" />
-                Export Report
+                <FileSpreadsheet className="w-4 h-4 mr-2" />
+                Export .xlsx
+              </button>
+              <button
+                onClick={() => handleExport('csv')}
+                className="flex items-center px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white rounded-lg hover:bg-slate-200 transition-colors font-medium text-sm"
+              >
+                <FileText className="w-4 h-4 mr-2" />
+                .csv
               </button>
             </div>
           </div>
@@ -271,6 +322,9 @@ export const ReconciliationScreen = () => {
                 {processedCount} rows · {results.matched.length} matched
                 {results.fuzzyCount > 0 && (
                   <span className="text-amber-600 dark:text-amber-400"> ({results.fuzzyCount} fuzzy)</span>
+                )}
+                {results.groupMatched.length > 0 && (
+                  <span className="text-indigo-600 dark:text-indigo-400"> +{results.groupMatched.length} grouped</span>
                 )}
                 , {results.unmatchedBank.length} bank-only, {results.unmatchedERP.length} ERP-only.
               </p>

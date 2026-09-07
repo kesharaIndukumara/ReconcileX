@@ -89,8 +89,9 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
   return (
     <div
       className={`relative w-full p-8 border-2 border-dashed rounded-2xl transition-all duration-200 ease-in-out cursor-pointer
-        ${isDragActive 
-          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/10' 
+        focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500
+        ${isDragActive
+          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/10'
           : 'border-slate-300 hover:border-slate-400 dark:border-slate-700 dark:hover:border-slate-600 bg-slate-50 dark:bg-slate-800/50'
         }
       `}
@@ -103,6 +104,7 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
         type="file"
         accept={acceptedTypes}
         onChange={handleChange}
+        aria-label={`${title} — choose a file`}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
       />
       <div className="flex flex-col items-center justify-center space-y-4 pointer-events-none">

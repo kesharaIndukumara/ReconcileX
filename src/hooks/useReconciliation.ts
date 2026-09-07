@@ -15,7 +15,7 @@ interface UseReconciliationOptions {
 
 const emptyResults: ReconciliationResults = {
   matched: [], unmatchedBank: [], unmatchedERP: [],
-  progress: 0, bankMatchRate: 0, erpMatchRate: 0, fuzzyCount: 0, fuzzySkipped: false,
+  progress: 0, bankMatchRate: 0, erpMatchRate: 0, fuzzyCount: 0, fuzzySkipped: false, groupMatched: [],
 };
 const emptyDup: DuplicateSummary = { groups: 0, extras: 0 };
 
@@ -76,6 +76,7 @@ export const useReconciliation = (
         erpMatchRate: out.erpMatchRate,
         fuzzyCount: out.fuzzyCount,
         fuzzySkipped: out.fuzzySkipped,
+        groupMatched: out.groupMatched,
       });
       setProcessingProgress(100);
       setTimeout(() => { if (active) setIsProcessing(false); }, 300);

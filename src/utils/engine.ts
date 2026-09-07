@@ -5,8 +5,10 @@ import {
   DuplicateGroup,
   DuplicateSummary,
   DuplicateStrategy,
+  GroupMatch,
 } from '../types';
-import { getRowSignature, describeRow, evaluateMatch } from './reconcile';
+import { getRowSignature, describeRow, evaluateMatch, evaluateRule, normalizeNumeric } from './reconcile';
+import { NUMERIC_EPSILON } from './constants';
 
 export interface EngineInput {
   bankData: TransactionRow[];
@@ -26,10 +28,33 @@ export interface EngineOutput {
   erpMatchRate: number;
   fuzzyCount: number;
   fuzzySkipped: boolean;
+  groupMatched: GroupMatch[];
 }
 
 /** Cap on leftover comparisons for the tolerant second pass. */
 export const FUZZY_CAP = 4_000_000;
+/** Max rows on the "many" side of a one-to-many group. */
+export const MAX_GROUP = 4;
+/** Skip the group pass if the leftover set is larger than this. */
+export const GROUP_LEFTOVER_CAP = 4_000;
+
+/** Returns the indices of a subset of `values` (size 2..maxSize) that sums to target. */
+const subsetSum = (values: number[], target: number, tol: number, maxSize: number): number[] | null => {
+  const n = values.length;
+  const pick: number[] = [];
+  const dfs = (start: number, remaining: number, depth: number): number[] | null => {
+    if (pick.length >= 2 && Math.abs(remaining) <= tol) return [...pick];
+    if (depth === 0) return null;
+    for (let i = start; i < n; i++) {
+      pick.push(i);
+      const hit = dfs(i + 1, remaining - values[i], depth - 1);
+      if (hit) return hit;
+      pick.pop();
+    }
+    return null;
+  };
+  return dfs(0, target, maxSize);
+};
 
 const rate = (num: number, denom: number) => (denom > 0 ? Math.round((num / denom) * 100) : 0);
 
@@ -95,7 +120,7 @@ export function runReconciliation(
     return {
       matched: [], unmatchedBank: [], unmatchedERP: [...erpItems],
       duplicateGroups, duplicateSummary,
-      progress: 0, bankMatchRate: 0, erpMatchRate: 0, fuzzyCount: 0, fuzzySkipped: false,
+      progress: 0, bankMatchRate: 0, erpMatchRate: 0, fuzzyCount: 0, fuzzySkipped: false, groupMatched: [],
     };
   }
 
@@ -165,8 +190,69 @@ export function runReconciliation(
     }
   }
 
+  // ----- pass 3: one-to-many (split payments / batches) -------------------
+  const groupMatched: GroupMatch[] = [];
+  const primaryNumeric = rules.find(r => r.comparisonMode === 'numeric');
+  const otherRules = rules.filter(r => r !== primaryNumeric);
+  const groupTol =
+    primaryNumeric?.tolerance?.kind === 'amount' ? Math.abs(primaryNumeric.tolerance.value) : NUMERIC_EPSILON;
+  const canGroup =
+    !!primaryNumeric &&
+    unmatchedBank.length > 0 &&
+    unmatchedERP.length > 0 &&
+    unmatchedBank.length + unmatchedERP.length <= GROUP_LEFTOVER_CAP;
+
+  if (canGroup && primaryNumeric) {
+    const numOf = (row: TransactionRow, side: 'bank' | 'erp') =>
+      normalizeNumeric(String(row[side === 'bank' ? primaryNumeric.bankColumn : primaryNumeric.erpColumn] ?? ''));
+
+    const runDirection = (anchorSide: 'bank' | 'erp') => {
+      const anchors = anchorSide === 'bank' ? unmatchedBank : unmatchedERP;
+      const manySide: 'bank' | 'erp' = anchorSide === 'bank' ? 'erp' : 'bank';
+      const pool = manySide === 'bank' ? unmatchedBank : unmatchedERP;
+      const poolTaken = new Set<number>();
+      const keptAnchors: TransactionRow[] = [];
+
+      for (const anchor of anchors) {
+        const target = numOf(anchor, anchorSide);
+        if (target === null) { keptAnchors.push(anchor); continue; }
+
+        const candIdx: number[] = [];
+        for (let i = 0; i < pool.length && candIdx.length < 30; i++) {
+          if (poolTaken.has(i)) continue;
+          const many = pool[i];
+          const bankRow = anchorSide === 'bank' ? anchor : many;
+          const erpRow = anchorSide === 'bank' ? many : anchor;
+          if (otherRules.every(r =>
+            evaluateRule(r, String(bankRow[r.bankColumn] ?? ''), String(erpRow[r.erpColumn] ?? ''))
+          )) candIdx.push(i);
+        }
+        const values = candIdx.map(i => numOf(pool[i], manySide) ?? NaN);
+        if (values.some(Number.isNaN)) { keptAnchors.push(anchor); continue; }
+
+        const hit = subsetSum(values, target, groupTol, MAX_GROUP);
+        if (hit) {
+          const picked = hit.map(k => candIdx[k]);
+          picked.forEach(i => poolTaken.add(i));
+          groupMatched.push({ anchorSide, anchor, group: picked.map(i => pool[i]) });
+        } else {
+          keptAnchors.push(anchor);
+        }
+      }
+
+      const remainingMany = pool.filter((_, i) => !poolTaken.has(i));
+      if (anchorSide === 'bank') { unmatchedBank = keptAnchors; unmatchedERP = remainingMany; }
+      else { unmatchedERP = keptAnchors; unmatchedBank = remainingMany; }
+    };
+
+    runDirection('bank');
+    if (unmatchedBank.length > 0 && unmatchedERP.length > 0) runDirection('erp');
+  }
+
   report(100);
-  const matchedCount = matched.length;
+  // Each grouped row (anchor + its group) counts once toward the match rate.
+  const groupRowCount = groupMatched.reduce((n, g) => n + 1 + g.group.length, 0);
+  const matchedCount = matched.length + groupRowCount;
   const combined = bankTotal + erpTotal;
   return {
     matched,
@@ -179,5 +265,6 @@ export function runReconciliation(
     erpMatchRate: rate(matchedCount, erpTotal),
     fuzzyCount,
     fuzzySkipped,
+    groupMatched,
   };
 }
