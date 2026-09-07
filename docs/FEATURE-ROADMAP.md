@@ -4,8 +4,8 @@ A feature-by-feature plan: what exists, what to change, and which new features a
 building next. Written against the current codebase (single commit `1dc9317`, post
 dependency upgrade).
 
-> **Progress:** v0.1 ("Honest & polished") is implemented — see the Implementation log at
-> the bottom. Rows below are marked ✅ when done.
+> **Progress:** v0.1 ("Honest & polished") and v0.2 ("Use what's already built") are
+> implemented — see the Implementation log at the bottom. Rows below are marked ✅ when done.
 
 ## Legend
 
@@ -31,8 +31,8 @@ dependency upgrade).
 | 2 | ✅ **`getRowSignature` `\|\| ''` → `?? ''`** — a real `0` is preserved. Regression test added. | P0 | S | Done |
 | 3 | ✅ **Signature now `JSON.stringify(parts)`** — no cross-field collisions. | P1 | S | Done |
 | 4 | ✅ **Match rate is both-sided.** `progress` is now the combined rate; `bankMatchRate` / `erpMatchRate` added to results and shown as "Bank x% · ERP y%" on the badge. | P1 | S | Done |
-| 5 | **`evaluateMatch` is dead code.** Either delete it or (better) reuse it for the "why didn't this row match?" explainer (see 2.4 / 3.9). | P2 | S | |
-| 6 | **Artificial delays** (`setTimeout` 300 / 5 / 500 ms). Keep a *minimum* visible spinner time (~600 ms) but drop the rest; on a 500-row file the run should feel instant. | P2 | S | |
+| 5 | **`evaluateMatch` is dead code.** Either delete it or (better) reuse it for the "why didn't this row match?" explainer (see 2.4 / 3.9). | P2 | S | Kept — will power "why unmatched?" in v0.3 |
+| 6 | ✅ **Artificial delays trimmed** (start 300→150 ms, per-chunk 5→0 ms, tail 500→400 ms; chunk size 200→500). | P2 | S | Done (v0.2) |
 | 7 | **Move matching into a Web Worker.** Main-thread chunking still blocks paint on 100k rows. A worker makes "massive spreadsheets" real and lets the progress bar be honest. | P2 | M | Enables 1.6, 3.7 |
 | 8 | **Cancel button.** The engine already has an `isMounted` flag — expose a user abort from `ProcessingOverlay`. | P2 | S | |
 
@@ -40,59 +40,59 @@ dependency upgrade).
 
 | # | Change | Priority | Effort | Notes |
 |---|--------|----------|--------|-------|
-| 1 | ✅ **`alert()` replaced with `Toast`** in `handleStartReconciliation`. | P0 | S | Done |
-| 2 | **Validate rules:** warn on a rule with only one side filled, the same column mapped twice, or zero valid rules (currently only the last is blocked). | P1 | S | |
-| 3 | **Data preview.** Show 3–5 sample rows per side above the rule builder so users map against real values, not just header names. | P1 | M | Big comprehension win |
-| 4 | **Auto-suggest mappings** by fuzzy header match (`"Txn Date"`↔`"Date"`, `"Amt"`↔`"Amount"`). Pre-fill rules, let the user correct. | P1 | M | Pairs with 1.2.3 |
-| 5 | **Template manager.** `deleteRuleAsync` / `duplicateRuleAsync` already exist in `DatabaseContext` with no UI. Add rename / edit / delete / duplicate, and auto-select "last used" (`getLastUsedTemplate` also already built). | P1 | M | Exposes dead plumbing |
-| 6 | **Explain the vocabulary.** Info tooltips on "MUST EQUAL", "Compare As", "Text (Exact)", "Numeric", "AND". One sentence each. | P1 | S | |
+| 1 | ✅ **`alert()` replaced with `Toast`** in `handleStartReconciliation`. | P0 | S | Done (v0.1) |
+| 2 | ✅ **Rule validation** — half-filled rows are highlighted amber and listed in a "Check your rules" panel; duplicate Bank/ERP column use is flagged. | P1 | S | Done (v0.2) |
+| 3 | **Data preview.** Show 3–5 sample rows per side above the rule builder so users map against real values, not just header names. | P1 | M | v0.3 (with 1.2.4) |
+| 4 | **Auto-suggest mappings** by fuzzy header match (`"Txn Date"`↔`"Date"`, `"Amt"`↔`"Amount"`). Pre-fill rules, let the user correct. | P1 | M | v0.3 |
+| 5 | ✅ **Template manager** — Manage modal with load / rename / duplicate / delete; `getLastUsedTemplate` auto-loads on a pristine rule list; loading a template records it as last-used. New `updateRuleAsync` wired through context. | P1 | M | Done (v0.2) |
+| 6 | ✅ **Vocabulary tooltips** — `<InfoTip>` on "MUST EQUAL" and "Compare As" (Text vs Numeric). | P1 | S | Done (v0.2) |
 
 ### 1.3 Duplicate detection (`useReconciliation.ts` + `ReconciliationScreen.tsx` banner)
 
 | # | Change | Priority | Effort | Notes |
 |---|--------|----------|--------|-------|
-| 1 | **Show *which* rows are duplicates**, not just a count. Add a "Duplicates" tab grouping rows by signature. | P1 | M | Currently users can't act on the warning |
-| 2 | **Clearer wording:** "3 groups of identical rows (7 extra copies). Only the first in each group can match 1-to-1; the rest move to Unmatched." | P1 | S | |
-| 3 | **Let the user pick** how duplicates resolve: first-wins (current), or push *all* copies to Unmatched for manual review. | P2 | M | |
+| 1 | ✅ **Duplicate Rows tab** — 4th stat card (when any exist); `ResultsTable` renders each signature group with the kept row marked `1 ✓`. `useReconciliation` returns `duplicateGroups`. | P1 | M | Done (v0.2) |
+| 2 | ✅ **Banner reworded:** "N groups of identical rows (M extra copies) … open the Duplicate Rows tab". | P1 | S | Done (v0.2) |
+| 3 | ✅ **Duplicate strategy** setting: `first-wins` (default) or `all-unmatched`; honored by the engine (`poisoned` signatures) and reflected in the banner text. | P2 | M | Done (v0.2) |
 
 ### 1.4 Results & export (`ResultsTable.tsx`, `ReconciliationScreen.tsx`)
 
 | # | Change | Priority | Effort | Notes |
 |---|--------|----------|--------|-------|
-| 1 | ✅ **Thresholds unified** in `src/utils/constants.ts` (`MATCH_RATE`, `CONFETTI_THRESHOLD`); confetti now fires at the "great" tier. | P0 | S | Done |
-| 2 | **Results table caps at 100 rows** with no way to see the rest in-app. Add search + column sort + virtualized scroll (`react-window`) or pagination. | P1 | M | |
-| 3 | **Export:** use Electron `dialog.showSaveDialog` (currently `XLSX.writeFile` dumps to CWD); timestamp the default filename; add a **Summary sheet** (counts, match rate, rules used, file names, run date). | P1 | M | |
-| 4 | **Per-tab export** and a **CSV** option. | P2 | S | |
-| 5 | **"Why unmatched?"** per row — run `evaluateMatch` against the nearest candidate and show which rule failed. | P2 | M | Needs candidate lookup |
+| 1 | ✅ **Thresholds unified** in `src/utils/constants.ts`; confetti fires at the "great" tier and respects the `confettiEnabled` setting. | P0 | S | Done (v0.1 / v0.2) |
+| 2 | **Results table caps at 100 rows** with no way to see the rest in-app. Add search + column sort + virtualized scroll or pagination. | P1 | M | v0.4 |
+| 3 | ⏳ **Export** — **Summary sheet** and timestamped filename done (v0.2). Electron `dialog.showSaveDialog` still pending. | P1 | M | Partial (v0.2) → save dialog v0.4 |
+| 4 | **Per-tab export** and a **CSV** option. | P2 | S | v0.4 |
+| 5 | **"Why unmatched?"** per row — run `evaluateMatch` against the nearest candidate and show which rule failed. | P2 | M | v0.3 |
 | 6 | **Empty states** per tab instead of bare grey text; loading skeletons. | P3 | S | |
 
 ### 1.5 Sessions & recovery (`useDatabase.ts`, `UploadScreen.tsx`, `ReconciliationScreen.tsx`)
 
 | # | Change | Priority | Effort | Notes |
 |---|--------|----------|--------|-------|
-| 1 | **"Interrupted" is not real.** Every completed run flips `isActive:false`, so `activeSessions` is only ever non-empty during the ~1 s processing window. Either mark active *before* processing and clear only on real completion, or rename the banner to **"Continue last reconciliation"** and be honest. | P0 | S | Banner currently misleads |
-| 2 | **Resume loses earlier `matchedPairs`.** `handleResumeSession` feeds only `unmatchedBank/ERP` back as new input. Carry forward prior matches. | P1 | M | |
-| 3 | **`setToast` during render** in `UploadScreen` (`if (error && !toast.show) setToast(...)`). Move to an effect. | P1 | S | React anti-pattern; will trip the stricter react-hooks rules |
-| 4 | **No session list.** `getAllSessions` / `allSessions` is loaded but unused. See new feature 2.3. | P1 | — | |
+| 1 | ✅ **Banner reworded** to "Continue last reconciliation" (v0.1). Session row is created `isActive:true` at run start, `false` on completion; `session_start` / `session_complete` events logged. Precise crash detection still coarse. | P0 | S | Done (v0.1 / v0.2) |
+| 2 | **Resume loses earlier `matchedPairs`.** `handleResumeSession` feeds only `unmatchedBank/ERP` back as new input. Carry forward prior matches. | P1 | M | v0.3 |
+| 3 | ✅ **`setToast` during render → `useEffect([error])`** in `UploadScreen`. | P1 | S | Done (v0.1) |
+| 4 | ✅ **Session list** — `/history` browser reads `getAllSessions`; reopen / delete / sparkline / auto-prune. | P1 | — | Done (v0.2) |
 
 ### 1.6 Preferences & theme (`useDatabase.ts` — `useThemePreference`, `useAutoSaveSettings`, `useColumnDefaults`)
 
 | # | Change | Priority | Effort | Notes |
 |---|--------|----------|--------|-------|
-| 1 | **Dark mode is not real.** `dark:` classes are everywhere, but nothing ever sets `class="dark"` on `<html>` — the app only follows the OS setting and `useThemePreference` is never rendered. Add a top-level effect: `document.documentElement.classList.toggle('dark', theme === 'dark')`, wire Tailwind v4's `dark` variant to `class`, put a toggle in `StepIndicator`. | P0 | S | |
-| 2 | **`Toast` has no `dark:` variants** (`bg-green-50`, `text-slate-800`) — looks broken in dark mode. | P0 | S | |
-| 3 | **`useAutoSaveSettings`, `useColumnDefaults`, `useAutoSaveSession`** are fully built and wired to nothing. Surface them in a Settings screen (feature 2.4). | P1 | — | |
+| 1 | ✅ **Real dark mode** — `@custom-variant dark` (class-based); `useThemePreference` applies `.dark`, seeds from OS/DOM, persists; `<ThemeToggle>` in `StepIndicator` + Settings. | P0 | S | Done (v0.1) |
+| 2 | ✅ **`Toast` dark variants** added. | P0 | S | Done (v0.1) |
+| 3 | ⏳ **Settings screen** surfaces theme, confetti, duplicate strategy, auto-save on/off, history cap, DB compact/clear/reset. `useColumnDefaults` and the auto-save *interval* editor still unused. | P1 | — | Partial (v0.2) |
 
 ### 1.7 Dead / disconnected code
 
-| Item | Where | Recommendation |
-|------|-------|----------------|
-| **History logging** — `logHistory` / `getSessionHistory` / `getAllHistory` wired through `db.ts` + `main.ts` + `preload.ts`, never called from the renderer | `electron/db.ts`, IPC | Wire it (feature 2.3) or delete the surface to reduce confusion |
-| **DB maintenance** — `vacuum` / `optimize` IPC exists, no caller | `electron/db.ts` | Expose in Settings ("Compact database") or drop |
-| **`src/types/database.d.ts`** referenced in a comment in `DatabaseContext.tsx` | — | File doesn't exist; the type now lives in `electron/electron-env.d.ts`. Fix the comment |
-| **No tests** despite `reconcile.ts` being pure | — | Add Vitest + a `reconcile.test.ts` (feature 2.8) |
-| **`index.html`** title still `"Vite + React + TS"`, favicon `vite.svg` | `index.html` | Rename to ReconcileX, add a real icon |
-| **`electron-builder.json5`** placeholders `YourAppID` / `YourAppName` | build config | Fill before any packaged build |
+| Item | Status |
+|------|--------|
+| **History logging** — `logHistory` etc. never called | ✅ `logEvent` in context; `session_start` / `session_complete` written from `ReconciliationScreen` (v0.2) |
+| **DB maintenance** — `vacuum` / `optimize` no caller | ✅ Settings → "Compact database"; new `clearHistory` / `resetDatabase` IPC + Settings actions (v0.2) |
+| **`src/types/database.d.ts`** stale comment in `DatabaseContext.tsx` | ✅ Comment corrected (v0.2) |
+| **No tests** despite `reconcile.ts` being pure | ✅ Vitest + `reconcile.test.ts` (14 cases) (v0.1 / v0.2) |
+| **`index.html`** title / favicon | ✅ `ReconcileX` + `public/reconcilex.svg` (v0.1) |
+| **`electron-builder.json5`** placeholders | ⏳ v0.4 packaging |
 
 ---
 
@@ -133,10 +133,15 @@ for large files.
 Persist overrides on the session (`manualMatches: [{bankId, erpId}]`) so they survive
 resume and export. Needs stable row ids (add a synthetic `__rowId` at parse time).
 
-### 2.3 Reconciliation history browser  ·  **P1 · Effort M**
+### 2.3 Reconciliation history browser  ·  **P1 · Effort M · ✅ DONE (v0.2)**
 
 **Problem:** every run is saved to SQLite but there's no way to see past runs — only the
 single "resume" banner.
+
+**Shipped:** `/history` route — session list (date, files, match %, counts), reopen in
+read-only "review" mode, delete, match-rate sparkline, cap-based auto-prune (Settings).
+Per-session event *timeline* (from `getSessionHistory`) is available via
+`getSessionHistoryAsync` but not yet surfaced in the UI.
 
 **Build:** a `/history` route listing sessions from `getAllSessions` (date, files, match
 rate, row counts). Row actions: **reopen** (load saved results into `ReconciliationScreen`
@@ -144,17 +149,11 @@ read-only), **delete**, **export**. Add a small match-rate trend chart across ru
 is where the dead `history` table earns its place — log `session_start` /
 `session_complete` / `rule_save` events and show them as a per-session timeline.
 
-### 2.4 Settings screen  ·  **P1 · Effort M · unlocks already-built code**
+### 2.4 Settings screen  ·  **P1 · Effort M · ✅ DONE (v0.2)**
 
-One `/settings` route that finally renders the hooks that already exist:
-
-- Theme (light / dark / system) — `useThemePreference`
-- Auto-save on/off + interval — `useAutoSaveSettings`
-- Default columns — `useColumnDefaults`
-- Duplicate-resolution strategy (1.3.3)
-- Confetti / animations toggle (accessibility)
-- "Compact database" → `vacuum` + `optimize`
-- Reset: clear templates / clear history / factory reset (`resetDatabase` exists)
+`/settings` route. Shipped: theme, "celebrate high match rates" (confetti), duplicate
+strategy, auto-save on/off, history cap, Compact database, Clear history, Factory reset.
+Not yet: auto-save *interval* editor, `useColumnDefaults` defaults.
 
 ### 2.5 Column auto-mapping + preview  ·  **P1 · Effort M**
 
@@ -182,11 +181,11 @@ Only the first worksheet is read and the header is assumed to be row 1. Add: a s
 picker when a workbook has multiple sheets, and a "header is on row N / skip N top rows"
 control. Cheap, removes a class of "no columns detected" support questions.
 
-### 2.8 Test suite  ·  **P1 · Effort S to start**
+### 2.8 Test suite  ·  **P1 · ✅ STARTED (v0.1 / v0.2)**
 
-Add **Vitest**. Start with `src/utils/reconcile.test.ts` covering: exact match, numeric
-comma stripping, the zero-value bug (1.1.2), duplicate cascade, ERP-heavy match-rate
-(1.1.4). Grows naturally as the engine gains tolerance modes.
+Vitest (`vitest.config.ts`, standalone). `src/utils/reconcile.test.ts` — 14 cases:
+`normalizeNumeric`, exact / zero / sub-cent match, signature format & collisions,
+`describeRow`. Engine-level and component tests still to come.
 
 ### 2.9 Explainability / onboarding  ·  **P1 · Effort S–M**
 
@@ -205,34 +204,38 @@ packaged app / `npm run dev`); `electron-updater` for auto-update; app icon set.
 
 ## Part 3 — UI / UX system improvements
 
-| # | Change | Priority | Effort |
-|---|--------|----------|--------|
-| 1 | Real dark mode + toggle (1.6.1) and dark-aware `Toast` (1.6.2) | P0 | S |
-| 2 | One feedback system: no `alert()`, a `Toast` **queue** so rapid errors don't overwrite | P1 | S |
-| 3 | `ProcessingOverlay`: show "matched 8,240 / 12,000 rows" + elapsed time + Cancel, not just a % | P1 | S |
-| 4 | Accessibility: `aria-selected` on the stat-card tabs, `role="button"` + keyboard on `FileDropzone`, focus trap + `Esc` in modals | P1 | M |
-| 5 | `ErrorBoundary` "Return to Start" calls `window.location.reload()` and wipes all parsed data — at least confirm, ideally persist parsed data so a crash isn't a full restart | P2 | M |
-| 6 | Consistent number formatting (thousands separators) in tables and stat cards | P3 | S |
-| 7 | Bundle is 835 kB — lazy-load `xlsx` (only needed on parse + export) and `react-confetti` | P2 | S |
+| # | Change | Priority | Effort | Status |
+|---|--------|----------|--------|--------|
+| 1 | Real dark mode + toggle and dark-aware `Toast` | P0 | S | ✅ v0.1 |
+| 2 | One feedback system: no `alert()`, a `Toast` **queue** so rapid errors don't overwrite | P1 | S | `alert()` gone (v0.1); queue → v0.4 |
+| 3 | `ProcessingOverlay`: show "matched 8,240 / 12,000 rows" + elapsed time + Cancel | P1 | S | v0.3 (with Web Worker) |
+| 4 | Accessibility: `aria-*` on tabs, keyboard `FileDropzone`, focus trap + `Esc` in modals | P1 | M | `aria-pressed` on tabs (v0.2); rest → v0.4 |
+| 5 | `ErrorBoundary` "Return to Start" wipes parsed data — confirm / persist | P2 | M | v0.4 |
+| 6 | Consistent number formatting in tables and stat cards | P3 | S | v0.4 |
+| 7 | Bundle 835 kB — lazy-load `xlsx` and `react-confetti` | P2 | S | v0.4 |
 
 ---
 
 ## Suggested release plan
 
-### v0.1 — "Honest & polished" (P0 + cheap P1)
+### v0.1 — "Honest & polished" — ✅ DONE
 Dark mode + toggle · dark `Toast` · float-safe compare · zero-value fix · `alert()`→Toast ·
 confetti/badge threshold · match-rate label (both sides) · recovery-banner wording ·
 `setToast`-in-render fix · `index.html` title/icon · Vitest + first `reconcile` tests.
 
-### v0.2 — "Use what's already built"
-Template manager UI · reconciliation history browser · Settings screen · duplicates tab.
+### v0.2 — "Use what's already built" — ✅ DONE
+Template manager UI · reconciliation history browser · Settings screen · duplicates tab ·
+duplicate strategy · rule validation · vocabulary tooltips · export summary sheet ·
+history logging + DB maintenance wired · trimmed processing delays.
 
-### v0.3 — "Matching that matches reality"
-Per-rule tolerance + two-pass engine · Web Worker · manual match/unmatch · "why unmatched?".
+### v0.3 — "Matching that matches reality" — next
+Per-rule tolerance + two-pass engine · Web Worker · manual match/unmatch · "why unmatched?" ·
+data preview + auto-suggest mappings · resume carries forward matches · Cancel button.
 
 ### v0.4 — "Scale & ship"
-Virtualized results + search/sort · export save-dialog + summary sheet + CSV ·
-one-to-many group matching · sheet/header controls · packaging (rebuild, updater, icon).
+Virtualized results + search/sort · export save-dialog + CSV · one-to-many group matching ·
+sheet/header controls · Toast queue · a11y pass · lazy-load `xlsx`/`confetti` ·
+packaging (rebuild, updater, icon, appId).
 
 ---
 
@@ -248,3 +251,42 @@ one-to-many group matching · sheet/header controls · packaging (rebuild, updat
    workbook, or merge them into "Matched"?
 5. **Target scale** — realistic max row count per file? Decides whether the Web Worker
    (2.1 dependency) is v0.3 or can wait.
+
+**Defaults chosen so far** (change any of these): fuzzy UX = per-rule tolerance;
+duplicate default = `first-wins` (switchable in Settings); history retention = cap 100,
+auto-prune oldest; manual matches in export = TBD (v0.3); target scale assumed ≤ ~100k
+rows/file → Web Worker planned for v0.3.
+
+---
+
+## Implementation log
+
+### v0.1 — "Honest & polished"
+Branch `feat/v0.1-honest-and-polished` (folded into `feat/update-features`). Constants
+module; float-safe `normalizeNumeric`; `?? ''` zero fix; `JSON.stringify` signature;
+both-sided match rate; unified thresholds; real class-based dark mode + `<ThemeToggle>`;
+dark `Toast`; `alert()`→`Toast`; `setToast`-in-render→effect; recovery banner reworded;
+`index.html` + favicon; Vitest + `reconcile.test.ts`.
+Gate: `tsc` ✓ · `lint` ✓ · `test` ✓ · `build` ✓.
+
+### v0.2 — "Use what's already built"
+Branch `feat/v0.2-use-whats-built` off `feat/update-features`.
+
+| Area | Files |
+|------|-------|
+| DB surface | `electron/db.ts` (+`clearHistory`), `electron/main.ts` (+`db:clearHistory`, `db:resetDatabase`), `electron/preload.ts`, `electron/electron-env.d.ts` |
+| Context | `DatabaseContext.tsx` — `updateRuleAsync`, `logEvent`, `getSessionHistoryAsync`, `vacuumAsync`, `optimizeAsync`, `clearHistoryAsync`, `factoryResetAsync`; stale comment fixed |
+| Hooks | `useDatabase.ts` — `useSavedRules`/`useRuleTemplates` gain `updateTemplate` |
+| Types | `DuplicateStrategy`, `DuplicateGroup`, `DuplicateSummary`, `HistoryEventType`, `HistoryRecord` |
+| Engine | `useReconciliation.ts` rewritten — `duplicateGroups`, `duplicateSummary`, `duplicateStrategy` (`poisoned` signatures), trimmed delays; `reconcile.ts` +`describeRow` |
+| Components | `InfoTip` (new); `StatsCards` (4th Duplicates card, `aria-pressed`); `ResultsTable` (duplicates rendering); `StepIndicator` (History/Settings nav) |
+| Pages | `MappingScreen` (validation panel, tooltips, template Manage modal, auto-load last used); `ReconciliationScreen` (new dup banner, dup tab wiring, history events, read-only "review" mode, Summary sheet + timestamped export, confetti setting); `HistoryScreen` (new); `SettingsScreen` (new); `App.tsx` routes |
+| Tests | `reconcile.test.ts` → 14 cases (+`describeRow`) |
+
+Gate: `tsc` ✓ · `lint` ✓ · `test` 14/14 ✓ · `vite build` ✓.
+
+### Deferred from v0.2 → later
+- Per-session event *timeline* UI (data path via `getSessionHistoryAsync` exists).
+- Auto-save *interval* editor; `useColumnDefaults`.
+- Export **save dialog** (needs an Electron IPC channel) — v0.4.
+- Drag-and-drop is not used anywhere yet; manual match/unmatch is v0.3 (checkbox model).

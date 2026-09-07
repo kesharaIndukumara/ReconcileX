@@ -1,16 +1,69 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle } from 'lucide-react';
-import { MappingRule, ReconciliationResults, TransactionRow } from '../types';
+import { MappingRule, ReconciliationResults, TransactionRow, DuplicateGroup } from '../types';
 import { TabType } from './StatsCards';
 
 interface ResultsTableProps {
   activeTab: TabType;
   results: ReconciliationResults;
   rules: MappingRule[];
+  duplicateGroups?: DuplicateGroup[];
 }
 
-export const ResultsTable: React.FC<ResultsTableProps> = ({ activeTab, results, rules }) => {
+export const ResultsTable: React.FC<ResultsTableProps> = ({ activeTab, results, rules, duplicateGroups = [] }) => {
+  if (activeTab === 'duplicates') {
+    if (duplicateGroups.length === 0) {
+      return <div className="text-center py-20 text-slate-500">No duplicate rows detected.</div>;
+    }
+    return (
+      <div className="space-y-4">
+        {duplicateGroups.slice(0, 50).map((group, gi) => {
+          const keys = Array.from(
+            new Set(rules.map(r => (group.side === 'bank' ? r.bankColumn : r.erpColumn)).filter(Boolean))
+          );
+          return (
+            <div key={gi} className="rounded-xl border border-yellow-200 dark:border-yellow-800/50 bg-white dark:bg-slate-800 overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-3 bg-yellow-50 dark:bg-yellow-900/20 text-sm">
+                <span className="font-semibold text-yellow-800 dark:text-yellow-300">
+                  {group.side === 'bank' ? 'Bank' : 'ERP'} · {group.rows.length} identical rows
+                </span>
+                <span className="font-mono text-xs text-yellow-700/80 dark:text-yellow-400/70 truncate max-w-[60%]">{group.label}</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400">
+                    <tr>
+                      <th className="px-4 py-2 font-semibold w-10">#</th>
+                      {keys.map(k => <th key={k} className="px-4 py-2 font-semibold">{k}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {group.rows.map((row, ri) => (
+                      <tr key={ri} className={`border-b border-slate-100 dark:border-slate-700/50 ${ri === 0 ? '' : 'bg-yellow-50/40 dark:bg-yellow-900/10'}`}>
+                        <td className="px-4 py-2 text-slate-400">{ri === 0 ? '1 ✓' : ri + 1}</td>
+                        {keys.map(k => (
+                          <td key={k} className="px-4 py-2 text-slate-700 dark:text-slate-300 whitespace-nowrap truncate max-w-[220px]">
+                            {String(row[k] ?? '')}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
+        {duplicateGroups.length > 50 && (
+          <div className="p-4 text-center text-xs text-slate-500 dark:text-slate-400">
+            Showing the first 50 duplicate groups of {duplicateGroups.length}.
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (activeTab === 'matched') {
     if (results.matched.length === 0) {
       return <div className="text-center py-20 text-slate-500">No records found in this category.</div>;

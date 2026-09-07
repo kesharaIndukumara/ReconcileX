@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { MappingRule, TransactionRow } from '../types'
-import { evaluateMatch, getRowSignature, normalizeNumeric } from './reconcile'
+import { describeRow, evaluateMatch, getRowSignature, normalizeNumeric } from './reconcile'
 
 const numericRule = (bankColumn: string, erpColumn: string): MappingRule => ({
   id: `${bankColumn}-${erpColumn}`,
@@ -91,5 +91,18 @@ describe('getRowSignature', () => {
     const zeroSig = getRowSignature({ Amount: 0 }, rules, 'bank')
     const emptySig = getRowSignature({ Amount: '' }, rules, 'bank')
     expect(zeroSig).not.toBe(emptySig)
+  })
+})
+
+describe('describeRow', () => {
+  const rules = [textRule('Ref', 'Reference'), numericRule('Amount', 'Credit')]
+
+  it('renders the mapped values for the given side', () => {
+    const bank: TransactionRow = { Ref: 'INV-1', Amount: '1250' }
+    expect(describeRow(bank, rules, 'bank')).toBe('Ref=INV-1 · Amount=1250')
+  })
+
+  it('marks empty mapped cells', () => {
+    expect(describeRow({ Reference: 'X' }, rules, 'erp')).toBe('Reference=X · Credit=∅')
   })
 })
