@@ -21,6 +21,8 @@ const toResults = (s: ReconciliationSession): ReconciliationResults => {
     progress: s.matchPercentage ?? 0,
     bankMatchRate: rate(matched.length, bankTotal),
     erpMatchRate: rate(matched.length, erpTotal),
+    fuzzyCount: matched.filter(m => m.kind === 'fuzzy').length,
+    fuzzySkipped: false,
   };
 };
 
