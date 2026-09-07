@@ -1,13 +1,38 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Settings2, Plus, Trash2, Save, FolderCog, Pencil, Copy, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Settings2, Plus, Trash2, Save, FolderCog, Pencil, Copy, AlertTriangle, Wand2, Table } from 'lucide-react';
 
-import { ParsedDataState, MappingRule } from '../types';
+import { ParsedDataState, MappingRule, RuleTolerance, ComparisonMode, TransactionRow } from '../types';
 import { StepIndicator } from '../components/StepIndicator';
 import { InfoTip } from '../components/InfoTip';
 import { useRuleTemplates } from '../hooks/useDatabase';
+import { suggestMappings } from '../utils/mapping';
 import { Toast } from '../components/Toast';
+
+const TOLERANCE_OPTIONS: Record<ComparisonMode, { value: RuleTolerance['kind']; label: string; needsValue?: boolean }[]> = {
+  text: [
+    { value: 'exact', label: 'Exact' },
+    { value: 'normalized', label: 'Ignore case & spacing' },
+    { value: 'contains', label: 'One contains the other' },
+    { value: 'alnum', label: 'Letters & digits only' },
+  ],
+  numeric: [
+    { value: 'exact', label: 'Exact' },
+    { value: 'amount', label: 'Within ± amount', needsValue: true },
+    { value: 'percent', label: 'Within ± %', needsValue: true },
+  ],
+  date: [
+    { value: 'exact', label: 'Exact' },
+    { value: 'days', label: 'Within ± days', needsValue: true },
+  ],
+};
+
+const toleranceFor = (kind: RuleTolerance['kind'], value: number): RuleTolerance => {
+  if (kind === 'amount' || kind === 'percent' || kind === 'days') return { kind, value };
+  if (kind === 'exact') return { kind: 'exact' };
+  return { kind };
+};
 
 interface MappingLocationState {
   parsedData: ParsedDataState;
@@ -85,7 +110,32 @@ export const MappingScreen = () => {
   const addRule = () => setRules(prev => [...prev, newRule()]);
   const removeRule = (id: string) => setRules(prev => prev.filter(r => r.id !== id));
   const updateRule = (id: string, field: keyof MappingRule, value: string) =>
-    setRules(prev => prev.map(r => (r.id === id ? { ...r, [field]: value } : r)));
+    setRules(prev => prev.map(r => {
+      if (r.id !== id) return r;
+      const next = { ...r, [field]: value };
+      // Reset tolerance when the comparison mode changes — the kinds differ per mode.
+      if (field === 'comparisonMode') next.tolerance = { kind: 'exact' };
+      return next;
+    }));
+
+  const setTolerance = (id: string, tolerance: RuleTolerance) =>
+    setRules(prev => prev.map(r => (r.id === id ? { ...r, tolerance } : r)));
+
+  const previewRows = useMemo(() => ({
+    bank: (parsedData?.bankData ?? []).slice(0, 4),
+    erp: (parsedData?.erpData ?? []).slice(0, 4),
+  }), [parsedData]);
+
+  const handleSuggest = () => {
+    if (bankColumns.length === 0 || erpColumns.length === 0) return;
+    const suggested = suggestMappings(bankColumns, erpColumns);
+    if (suggested.length === 0) {
+      setToast({ show: true, msg: 'No confident column matches — map them manually.', type: 'error' });
+      return;
+    }
+    setRules(suggested);
+    setToast({ show: true, msg: `Suggested ${suggested.length} rule${suggested.length === 1 ? '' : 's'} — review before running.`, type: 'success' });
+  };
 
   const loadTemplate = (templateId: string) => {
     const template = templates.find(t => t.id === templateId);
@@ -233,13 +283,55 @@ export const MappingScreen = () => {
             </div>
           )}
 
+          {(previewRows.bank.length > 0 || previewRows.erp.length > 0) && (
+            <div className="mb-8 grid md:grid-cols-2 gap-4">
+              {(['bank', 'erp'] as const).map(side => {
+                const cols = side === 'bank' ? bankColumns : erpColumns;
+                const rows = previewRows[side] as TransactionRow[];
+                return (
+                  <div key={side} className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                    <div className="px-3 py-2 bg-slate-50 dark:bg-slate-900 text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center">
+                      <Table className="w-3.5 h-3.5 mr-1.5" /> {side === 'bank' ? 'Bank' : 'ERP'} preview
+                    </div>
+                    <div className="overflow-x-auto max-h-40">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
+                          <tr>{cols.slice(0, 6).map(c => <th key={c} className="px-3 py-1.5 font-medium whitespace-nowrap">{c}</th>)}</tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((r, ri) => (
+                            <tr key={ri} className="border-b border-slate-100 dark:border-slate-700/50">
+                              {cols.slice(0, 6).map(c => (
+                                <td key={c} className="px-3 py-1.5 text-slate-600 dark:text-slate-300 whitespace-nowrap truncate max-w-[140px]">{String(r[c] ?? '')}</td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Matching Rules</h3>
+            <button
+              onClick={handleSuggest}
+              className="flex items-center text-xs font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 bg-purple-50 dark:bg-purple-500/10 px-3 py-1.5 rounded-full transition-colors"
+            >
+              <Wand2 className="w-3.5 h-3.5 mr-1" /> Suggest mappings
+            </button>
+          </div>
+
           <div className="grid grid-cols-[1fr_auto_1fr_minmax(120px,auto)_auto] gap-4 mb-4 text-sm font-semibold text-slate-500 uppercase tracking-wider px-2">
             <div>Bank Statement Column</div>
             <div className="w-8" />
             <div>ERP Statement Column</div>
             <div className="flex items-center gap-1">
               Compare As
-              <InfoTip text="Text (Exact): case-insensitive string match. Numeric: strips commas and compares the number, so 1,250.00 equals 1250." />
+              <InfoTip text="Text: case-insensitive match. Numeric: strips commas, compares the number. Date: parses both sides. Add slack with the Tolerance row." />
             </div>
             <div className="w-10" />
           </div>
@@ -252,56 +344,89 @@ export const MappingScreen = () => {
                   key={rule.id}
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
-                  className={`grid grid-cols-[1fr_auto_1fr_minmax(120px,auto)_auto] items-center gap-4 p-4 rounded-2xl border transition-colors ${
+                  className={`flex flex-col gap-3 p-4 rounded-2xl border transition-colors ${
                     halfFilled
                       ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-300 dark:border-amber-800'
                       : 'bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-700 hover:border-purple-300'
                   }`}
                 >
-                  <select
-                    value={rule.bankColumn}
-                    onChange={(e) => updateRule(rule.id, 'bankColumn', e.target.value)}
-                    className="w-full bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl px-4 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900"
-                  >
-                    <option value="">Select Bank Column...</option>
-                    {bankColumns.map(col => <option key={`bank-${col}`} value={col}>{col}</option>)}
-                  </select>
+                  <div className="grid grid-cols-[1fr_auto_1fr_minmax(120px,auto)_auto] items-center gap-4">
+                    <select
+                      value={rule.bankColumn}
+                      onChange={(e) => updateRule(rule.id, 'bankColumn', e.target.value)}
+                      className="w-full bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl px-4 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900"
+                    >
+                      <option value="">Select Bank Column...</option>
+                      {bankColumns.map(col => <option key={`bank-${col}`} value={col}>{col}</option>)}
+                    </select>
 
-                  <div className="flex items-center gap-1 font-mono text-xs text-slate-400 bg-white dark:bg-slate-800 px-3 py-1 rounded-full shadow-sm border border-slate-200 dark:border-slate-700">
-                    MUST EQUAL
-                    <InfoTip text="The two columns must hold the same value for a row to be considered a match." />
+                    <div className="flex items-center gap-1 font-mono text-xs text-slate-400 bg-white dark:bg-slate-800 px-3 py-1 rounded-full shadow-sm border border-slate-200 dark:border-slate-700">
+                      MUST EQUAL
+                      <InfoTip text="The two columns must hold the same value for a row to be considered a match." />
+                    </div>
+
+                    <select
+                      value={rule.erpColumn}
+                      onChange={(e) => updateRule(rule.id, 'erpColumn', e.target.value)}
+                      className="w-full bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl px-4 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900"
+                    >
+                      <option value="">Select ERP Column...</option>
+                      {erpColumns.map(col => <option key={`erp-${col}`} value={col}>{col}</option>)}
+                    </select>
+
+                    <select
+                      value={rule.comparisonMode || 'text'}
+                      onChange={(e) => updateRule(rule.id, 'comparisonMode', e.target.value)}
+                      className="w-full bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900 text-sm"
+                    >
+                      <option value="text">Text</option>
+                      <option value="numeric">Numeric</option>
+                      <option value="date">Date</option>
+                    </select>
+
+                    <button
+                      onClick={() => removeRule(rule.id)}
+                      disabled={rules.length === 1}
+                      aria-label="Remove rule"
+                      className={`p-3 rounded-xl transition-colors ${
+                        rules.length === 1
+                          ? 'text-slate-300 cursor-not-allowed dark:text-slate-700'
+                          : 'text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10'
+                      }`}
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
                   </div>
 
-                  <select
-                    value={rule.erpColumn}
-                    onChange={(e) => updateRule(rule.id, 'erpColumn', e.target.value)}
-                    className="w-full bg-white dark:bg-slate-800 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl px-4 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900"
-                  >
-                    <option value="">Select ERP Column...</option>
-                    {erpColumns.map(col => <option key={`erp-${col}`} value={col}>{col}</option>)}
-                  </select>
-
-                  <select
-                    value={rule.comparisonMode || 'text'}
-                    onChange={(e) => updateRule(rule.id, 'comparisonMode', e.target.value)}
-                    className="w-full bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900 text-sm"
-                  >
-                    <option value="text">Text (Exact)</option>
-                    <option value="numeric">Numeric</option>
-                  </select>
-
-                  <button
-                    onClick={() => removeRule(rule.id)}
-                    disabled={rules.length === 1}
-                    aria-label="Remove rule"
-                    className={`p-3 rounded-xl transition-colors ${
-                      rules.length === 1
-                        ? 'text-slate-300 cursor-not-allowed dark:text-slate-700'
-                        : 'text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10'
-                    }`}
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
+                  {(() => {
+                    const mode: ComparisonMode = rule.comparisonMode ?? 'text';
+                    const opts = TOLERANCE_OPTIONS[mode];
+                    const kind = rule.tolerance?.kind ?? 'exact';
+                    const value = rule.tolerance && 'value' in rule.tolerance ? rule.tolerance.value : 1;
+                    const needsValue = opts.find(o => o.value === kind)?.needsValue;
+                    return (
+                      <div className="flex items-center gap-2 pl-1 text-sm text-slate-500 dark:text-slate-400">
+                        <span className="text-xs uppercase tracking-wider">Tolerance</span>
+                        <select
+                          value={kind}
+                          onChange={(e) => setTolerance(rule.id, toleranceFor(e.target.value as RuleTolerance['kind'], value))}
+                          className="bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-purple-500"
+                        >
+                          {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                        {needsValue && (
+                          <input
+                            type="number"
+                            min={0}
+                            step={mode === 'numeric' ? 0.01 : 1}
+                            value={value}
+                            onChange={(e) => setTolerance(rule.id, toleranceFor(kind, Math.max(0, Number(e.target.value) || 0)))}
+                            className="w-24 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-purple-500"
+                          />
+                        )}
+                      </div>
+                    );
+                  })()}
                 </motion.div>
               );
             })}

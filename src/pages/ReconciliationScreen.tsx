@@ -21,7 +21,11 @@ type ReconLocationState = ReconciliationState & {
   mode?: 'live' | 'review';
   savedResults?: ReconciliationResults;
   sessionLabel?: string;
+  /** Matches carried over when resuming an interrupted session. */
+  seedMatched?: import('../types').MatchedPair[];
 };
+
+const rateOf = (num: number, denom: number) => (denom > 0 ? Math.round((num / denom) * 100) : 0);
 
 const EMPTY_PARSED = { bankData: [], erpData: [] };
 
@@ -57,11 +61,32 @@ export const ReconciliationScreen = () => {
   }, [state, isReview]);
 
   const engine = useReconciliation(engineState, { duplicateStrategy });
-  const results = isReview && state?.savedResults ? state.savedResults : engine.results;
-  const { isProcessing, processingProgress, duplicateGroups, duplicateSummary } = engine;
+  const { isProcessing, processingProgress, elapsedMs, cancelled, cancel, duplicateGroups, duplicateSummary } = engine;
+
+  const results = useMemo<ReconciliationResults>(() => {
+    if (isReview && state?.savedResults) return state.savedResults;
+    const seed = state?.seedMatched ?? [];
+    if (seed.length === 0) return engine.results;
+    // Resuming: fold the carried-over matches back into this pass's numbers.
+    const matched = [...seed.map(m => ({ ...m, kind: m.kind ?? ('exact' as const) })), ...engine.results.matched];
+    const bankTotal = matched.length + engine.results.unmatchedBank.length;
+    const erpTotal = matched.length + engine.results.unmatchedERP.length;
+    return {
+      ...engine.results,
+      matched,
+      progress: bankTotal + erpTotal > 0 ? Math.round((matched.length * 2 * 100) / (bankTotal + erpTotal)) : 0,
+      bankMatchRate: rateOf(matched.length, bankTotal),
+      erpMatchRate: rateOf(matched.length, erpTotal),
+    };
+  }, [isReview, state?.savedResults, state?.seedMatched, engine.results]);
 
   const { createSession, updateSession } = useSessions();
   const { logEvent } = useDatabase();
+
+  // A user-cancelled run drops back to the mapping screen.
+  useEffect(() => {
+    if (cancelled) navigate(-1);
+  }, [cancelled, navigate]);
 
   const duplicateCount = duplicateSummary.bank.extras + duplicateSummary.erp.extras;
   const duplicateGroupCount = duplicateSummary.bank.groups + duplicateSummary.erp.groups;
@@ -69,7 +94,7 @@ export const ReconciliationScreen = () => {
   // Create the session row as soon as a live run starts.
   useEffect(() => {
     if (isReview || !state || sessionId) return;
-    let cancelled = false;
+    let aborted = false;
 
     (async () => {
       try {
@@ -83,7 +108,7 @@ export const ReconciliationScreen = () => {
           matchPercentage: 0,
           isActive: true,
         });
-        if (newId && !cancelled) {
+        if (newId && !aborted) {
           setSessionId(newId);
           void logEvent({
             sessionId: newId,
@@ -96,13 +121,13 @@ export const ReconciliationScreen = () => {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => { aborted = true; };
   }, [isReview, state, sessionId, createSession, logEvent]);
 
   // Persist the outcome once, when a live run finishes.
   const hasSavedRef = useRef(false);
   useEffect(() => {
-    if (isReview || !sessionId || isProcessing || hasSavedRef.current) return;
+    if (isReview || cancelled || !sessionId || isProcessing || hasSavedRef.current) return;
     hasSavedRef.current = true;
 
     (async () => {
@@ -128,7 +153,7 @@ export const ReconciliationScreen = () => {
         console.error('Failed to save session progress:', err);
       }
     })();
-  }, [isReview, sessionId, isProcessing, results, updateSession, logEvent]);
+  }, [isReview, cancelled, sessionId, isProcessing, results, updateSession, logEvent]);
 
   const handleExport = () => {
     const wb = XLSX.utils.book_new();
@@ -185,8 +210,8 @@ export const ReconciliationScreen = () => {
     return null;
   }
 
-  if (!isReview && isProcessing) {
-    return <ProcessingOverlay progress={processingProgress} />;
+  if (!isReview && (isProcessing || cancelled)) {
+    return <ProcessingOverlay progress={processingProgress} elapsedMs={elapsedMs} onCancel={cancel} />;
   }
 
   const processedCount = results.matched.length + results.unmatchedBank.length + results.unmatchedERP.length;
@@ -243,9 +268,17 @@ export const ReconciliationScreen = () => {
                 {isReview ? (state.sessionLabel || 'Saved Reconciliation') : 'Reconciliation Complete'}
               </h1>
               <p className="mt-2 text-slate-500 dark:text-slate-400">
-                {processedCount} rows · {results.matched.length} matched, {results.unmatchedBank.length} bank-only,
-                {' '}{results.unmatchedERP.length} ERP-only.
+                {processedCount} rows · {results.matched.length} matched
+                {results.fuzzyCount > 0 && (
+                  <span className="text-amber-600 dark:text-amber-400"> ({results.fuzzyCount} fuzzy)</span>
+                )}
+                , {results.unmatchedBank.length} bank-only, {results.unmatchedERP.length} ERP-only.
               </p>
+              {results.fuzzySkipped && (
+                <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                  The tolerant pass was skipped — too many leftover rows to compare. Tighten your rules or split the file.
+                </p>
+              )}
             </div>
 
             <MatchRateBadge

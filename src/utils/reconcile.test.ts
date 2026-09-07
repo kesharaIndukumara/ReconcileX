@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { MappingRule, TransactionRow } from '../types'
-import { describeRow, evaluateMatch, getRowSignature, normalizeNumeric } from './reconcile'
+import { describeRow, evaluateMatch, evaluateRule, getRowSignature, normalizeNumeric, parseDateMs } from './reconcile'
 
 const numericRule = (bankColumn: string, erpColumn: string): MappingRule => ({
   id: `${bankColumn}-${erpColumn}`,
@@ -91,6 +91,36 @@ describe('getRowSignature', () => {
     const zeroSig = getRowSignature({ Amount: 0 }, rules, 'bank')
     const emptySig = getRowSignature({ Amount: '' }, rules, 'bank')
     expect(zeroSig).not.toBe(emptySig)
+  })
+})
+
+describe('parseDateMs', () => {
+  it('parses ISO and d/m/y', () => {
+    expect(parseDateMs('2026-03-15')).toBe(new Date('2026-03-15').getTime())
+    expect(parseDateMs('15/03/2026')).toBe(new Date(2026, 2, 15).getTime())
+  })
+  it('returns null for junk', () => {
+    expect(parseDateMs('not a date')).toBeNull()
+    expect(parseDateMs('')).toBeNull()
+  })
+})
+
+describe('evaluateRule tolerances', () => {
+  const num = (t: MappingRule['tolerance']): MappingRule => ({ id: 'x', bankColumn: 'a', erpColumn: 'b', comparisonMode: 'numeric', tolerance: t })
+  const txt = (t: MappingRule['tolerance']): MappingRule => ({ id: 'x', bankColumn: 'a', erpColumn: 'b', comparisonMode: 'text', tolerance: t })
+
+  it('amount: within ± value', () => {
+    expect(evaluateRule(num({ kind: 'amount', value: 1 }), '100', '100.9')).toBe(true)
+    expect(evaluateRule(num({ kind: 'amount', value: 1 }), '100', '102')).toBe(false)
+  })
+  it('percent: within ± % of the larger value', () => {
+    expect(evaluateRule(num({ kind: 'percent', value: 2 }), '100', '101.5')).toBe(true)
+    expect(evaluateRule(num({ kind: 'percent', value: 2 }), '100', '105')).toBe(false)
+  })
+  it('text normalized / contains / alnum', () => {
+    expect(evaluateRule(txt({ kind: 'normalized' }), '  ACME  Co ', 'acme co')).toBe(true)
+    expect(evaluateRule(txt({ kind: 'contains' }), 'INV-100 payment', 'INV-100')).toBe(true)
+    expect(evaluateRule(txt({ kind: 'alnum' }), 'INV/100', 'inv-100')).toBe(true)
   })
 })
 
