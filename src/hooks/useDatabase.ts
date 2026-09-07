@@ -47,23 +47,55 @@ export const usePreferences = () => {
   };
 };
 
+type Theme = 'light' | 'dark';
+
+const getSystemTheme = (): Theme => {
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+};
+
 /**
- * Hook for managing theme preference
+ * Seed from the class already on <html> if one is set, so the theme survives route
+ * changes (each screen mounts its own toggle) even before the stored pref has loaded.
+ */
+const getInitialTheme = (): Theme =>
+  document.documentElement.classList.contains('dark') ? 'dark' : getSystemTheme();
+
+const applyThemeClass = (theme: Theme) => {
+  document.documentElement.classList.toggle('dark', theme === 'dark');
+};
+
+/**
+ * Manages the light/dark theme: applies a `.dark` class to <html>, seeds from the OS
+ * setting on first run, and persists the user's choice to the preferences store.
  */
 export const useThemePreference = () => {
   const { getPreference, setPreference } = usePreferences();
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [theme, setTheme] = useState<Theme>(getInitialTheme);
 
+  // Adopt the stored choice once preferences have loaded from the database.
   useEffect(() => {
-    const savedTheme = getPreference('theme', 'light');
-    setTheme(savedTheme);
+    const saved = getPreference<Theme | undefined>('theme', undefined);
+    if (saved === 'light' || saved === 'dark') {
+      setTheme(saved);
+    }
   }, [getPreference]);
 
-  const toggleTheme = useCallback(async () => {
-    const newTheme = theme === 'light' ? 'dark' : 'light';
-    setTheme(newTheme);
-    await setPreference('theme', newTheme);
-  }, [theme, setPreference]);
+  // Keep the <html> class in sync with the active theme.
+  useEffect(() => {
+    applyThemeClass(theme);
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme(prev => {
+      const next: Theme = prev === 'light' ? 'dark' : 'light';
+      void setPreference('theme', next);
+      return next;
+    });
+  }, [setPreference]);
 
   return { theme, toggleTheme };
 };

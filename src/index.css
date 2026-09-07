@@ -1,1 +1,5 @@
 @import "tailwindcss";
+
+/* Drive `dark:` utilities from a `.dark` class on <html> instead of the OS setting,
+   so the in-app theme toggle works. */
+@custom-variant dark (&:where(.dark, .dark *));

@@ -111,7 +111,7 @@ export const MappingScreen = () => {
   const handleStartReconciliation = () => {
     const validRules = rules.filter(r => r.bankColumn && r.erpColumn);
     if (validRules.length === 0) {
-      alert("Please map at least one pair of columns before continuing.");
+      setToast({ show: true, msg: 'Map at least one pair of columns before continuing.', type: 'error' });
       return;
     }
 

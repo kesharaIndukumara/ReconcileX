@@ -6,6 +6,7 @@ import { useWindowSize } from 'react-use';
 import * as XLSX from 'xlsx';
 import { ArrowLeft, Activity, Download, AlertTriangle, Save } from 'lucide-react';
 import { ReconciliationState, TransactionRow } from '../types';
+import { CONFETTI_THRESHOLD } from '../utils/constants';
 import { useReconciliation } from '../hooks/useReconciliation';
 import { useSessions } from '../hooks/useDatabase';
 import { ProcessingOverlay } from '../components/ProcessingOverlay';
@@ -139,7 +140,7 @@ export const ReconciliationScreen = () => {
         onClose={() => setToast({ ...toast, show: false })} 
       />
       
-      {results.progress > 80 && <Confetti width={width} height={height} recycle={false} numberOfPieces={500} />}
+      {results.progress >= CONFETTI_THRESHOLD && <Confetti width={width} height={height} recycle={false} numberOfPieces={500} />}
       
       {/* Top Header & Progress Context */}
       <div className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-6 shadow-sm z-10 w-full">
@@ -182,7 +183,11 @@ export const ReconciliationScreen = () => {
               </p>
             </div>
             
-            <MatchRateBadge progress={results.progress} />
+            <MatchRateBadge
+              progress={results.progress}
+              bankMatchRate={results.bankMatchRate}
+              erpMatchRate={results.erpMatchRate}
+            />
           </div>
         </div>
       </div>

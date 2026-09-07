@@ -28,7 +28,12 @@ export interface ReconciliationResults {
   matched: MatchedPair[];
   unmatchedBank: TransactionRow[];
   unmatchedERP: TransactionRow[];
+  /** Combined match rate: matched rows as a share of all bank + ERP rows (0–100). */
   progress: number;
+  /** Share of bank rows that found a match (0–100). */
+  bankMatchRate: number;
+  /** Share of ERP rows that found a match (0–100). */
+  erpMatchRate: number;
 }
 
 // ============ DATABASE TYPES ============

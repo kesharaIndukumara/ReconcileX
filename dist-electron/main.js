@@ -1,553 +1,316 @@
-import { app, BrowserWindow, ipcMain } from "electron";
-import { fileURLToPath } from "node:url";
-import path$1 from "node:path";
-import { createRequire } from "module";
-import path from "path";
-const require$1 = createRequire(import.meta.url);
-const Database = require$1("better-sqlite3");
-let db = null;
-function getDatabase() {
-  if (!db) {
-    const userDataPath = app.getPath("userData");
-    const dbPath = path.join(userDataPath, "rec-app.db");
-    db = new Database(dbPath);
-    db.pragma("journal_mode = WAL");
-    initializeSchema();
-  }
-  return db;
+import { BrowserWindow as e, app as t, ipcMain as n } from "electron";
+import { fileURLToPath as r } from "node:url";
+import i from "node:path";
+import { createRequire as a } from "module";
+import o from "path";
+//#region electron/db.ts
+var s = a(import.meta.url)("better-sqlite3"), c = null;
+function l() {
+	if (!c) {
+		let e = t.getPath("userData");
+		c = new s(o.join(e, "rec-app.db")), c.pragma("journal_mode = WAL"), u();
+	}
+	return c;
 }
-function initializeSchema() {
-  const database = db;
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS rules (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
-      description TEXT,
-      rules_json TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      name TEXT,
-      bank_file_name TEXT NOT NULL,
-      erp_file_name TEXT NOT NULL,
-      rules_id TEXT,
-      matched_pairs_json TEXT,
-      unmatched_bank_json TEXT,
-      unmatched_erp_json TEXT,
-      match_percentage REAL,
-      is_active BOOLEAN DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (rules_id) REFERENCES rules(id)
-    );
-  `);
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS preferences (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT,
-      event_type TEXT NOT NULL,
-      event_data TEXT,
-      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (session_id) REFERENCES sessions(id)
-    );
-  `);
-  database.exec(`
-    CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at);
-    CREATE INDEX IF NOT EXISTS idx_sessions_is_active ON sessions(is_active);
-    CREATE INDEX IF NOT EXISTS idx_rules_name ON rules(name);
-    CREATE INDEX IF NOT EXISTS idx_history_session_id ON history(session_id);
-  `);
+function u() {
+	let e = c;
+	e.exec("\n    CREATE TABLE IF NOT EXISTS rules (\n      id TEXT PRIMARY KEY,\n      name TEXT NOT NULL UNIQUE,\n      description TEXT,\n      rules_json TEXT NOT NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    );\n  "), e.exec("\n    CREATE TABLE IF NOT EXISTS sessions (\n      id TEXT PRIMARY KEY,\n      name TEXT,\n      bank_file_name TEXT NOT NULL,\n      erp_file_name TEXT NOT NULL,\n      rules_id TEXT,\n      rules_json TEXT,\n      matched_pairs_json TEXT,\n      unmatched_bank_json TEXT,\n      unmatched_erp_json TEXT,\n      match_percentage REAL,\n      is_active BOOLEAN DEFAULT 1,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      FOREIGN KEY (rules_id) REFERENCES rules(id)\n    );\n  "), e.exec("\n    CREATE TABLE IF NOT EXISTS preferences (\n      key TEXT PRIMARY KEY,\n      value TEXT NOT NULL,\n      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    );\n  "), e.exec("\n    CREATE TABLE IF NOT EXISTS history (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      session_id TEXT,\n      event_type TEXT NOT NULL,\n      event_data TEXT,\n      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,\n      FOREIGN KEY (session_id) REFERENCES sessions(id)\n    );\n  "), e.exec("\n    CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at);\n    CREATE INDEX IF NOT EXISTS idx_sessions_is_active ON sessions(is_active);\n    CREATE INDEX IF NOT EXISTS idx_rules_name ON rules(name);\n    CREATE INDEX IF NOT EXISTS idx_history_session_id ON history(session_id);\n  "), e.prepare("PRAGMA table_info(sessions)").all().map((e) => e.name).includes("rules_json") || e.exec("ALTER TABLE sessions ADD COLUMN rules_json TEXT");
 }
-function saveRule(mappingRules, name, description) {
-  const database = getDatabase();
-  const id = crypto.randomUUID();
-  const rulesJson = JSON.stringify(mappingRules);
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const stmt = database.prepare(`
-    INSERT INTO rules (id, name, description, rules_json, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
-  stmt.run(id, name, description || null, rulesJson, now, now);
-  return id;
+function d(e, t, n) {
+	let r = l(), i = crypto.randomUUID(), a = JSON.stringify(e), o = (/* @__PURE__ */ new Date()).toISOString();
+	return r.prepare("\n    INSERT INTO rules (id, name, description, rules_json, created_at, updated_at)\n    VALUES (?, ?, ?, ?, ?, ?)\n  ").run(i, t, n || null, a, o, o), i;
 }
-function loadRules() {
-  const database = getDatabase();
-  const stmt = database.prepare("SELECT * FROM rules ORDER BY updated_at DESC");
-  const rows = stmt.all();
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    rules: JSON.parse(row.rules_json),
-    createdAt: new Date(row.created_at),
-    updatedAt: new Date(row.updated_at)
-  }));
+function f() {
+	return l().prepare("SELECT * FROM rules ORDER BY updated_at DESC").all().map((e) => ({
+		id: e.id,
+		name: e.name,
+		description: e.description,
+		rules: JSON.parse(e.rules_json),
+		createdAt: new Date(e.created_at),
+		updatedAt: new Date(e.updated_at)
+	}));
 }
-function getRuleById(ruleId) {
-  const database = getDatabase();
-  const stmt = database.prepare("SELECT * FROM rules WHERE id = ?");
-  const row = stmt.get(ruleId);
-  if (!row) return null;
-  return {
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    rules: JSON.parse(row.rules_json),
-    createdAt: new Date(row.created_at),
-    updatedAt: new Date(row.updated_at)
-  };
+function p(e) {
+	let t = l().prepare("SELECT * FROM rules WHERE id = ?").get(e);
+	return t ? {
+		id: t.id,
+		name: t.name,
+		description: t.description,
+		rules: JSON.parse(t.rules_json),
+		createdAt: new Date(t.created_at),
+		updatedAt: new Date(t.updated_at)
+	} : null;
 }
-function updateRule(ruleId, name, description, mappingRules) {
-  const database = getDatabase();
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  if (mappingRules) {
-    const rulesJson = JSON.stringify(mappingRules);
-    const stmt = database.prepare(`
-      UPDATE rules SET name = ?, description = ?, rules_json = ?, updated_at = ?
-      WHERE id = ?
-    `);
-    stmt.run(name, description || null, rulesJson, now, ruleId);
-  } else {
-    const stmt = database.prepare(`
-      UPDATE rules SET name = ?, description = ?, updated_at = ?
-      WHERE id = ?
-    `);
-    stmt.run(name, description || null, now, ruleId);
-  }
+function m(e, t, n, r) {
+	let i = l(), a = (/* @__PURE__ */ new Date()).toISOString();
+	if (r) {
+		let o = JSON.stringify(r);
+		i.prepare("\n      UPDATE rules SET name = ?, description = ?, rules_json = ?, updated_at = ?\n      WHERE id = ?\n    ").run(t, n || null, o, a, e);
+	} else i.prepare("\n      UPDATE rules SET name = ?, description = ?, updated_at = ?\n      WHERE id = ?\n    ").run(t, n || null, a, e);
 }
-function deleteRule(ruleId) {
-  const database = getDatabase();
-  const stmt = database.prepare("DELETE FROM rules WHERE id = ?");
-  stmt.run(ruleId);
+function h(e) {
+	l().prepare("DELETE FROM rules WHERE id = ?").run(e);
 }
-function duplicateRule(sourceRuleId, newName) {
-  const sourceRule = getRuleById(sourceRuleId);
-  if (!sourceRule) {
-    throw new Error(`Rule ${sourceRuleId} not found`);
-  }
-  return saveRule(sourceRule.rules, newName, `Copy of ${sourceRule.name}`);
+function g(e, t) {
+	let n = p(e);
+	if (!n) throw Error(`Rule ${e} not found`);
+	return d(n.rules, t, `Copy of ${n.name}`);
 }
-function saveSession(sessionData) {
-  const database = getDatabase();
-  const id = crypto.randomUUID();
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const stmt = database.prepare(`
-    INSERT INTO sessions (
-      id, name, bank_file_name, erp_file_name, rules_id,
-      matched_pairs_json, unmatched_bank_json, unmatched_erp_json,
-      match_percentage, is_active, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const matchedPairsJson = sessionData.matchedPairs ? JSON.stringify(sessionData.matchedPairs) : null;
-  const unmatchedBankJson = sessionData.unmatchedBank ? JSON.stringify(sessionData.unmatchedBank) : null;
-  const unmatchedErpJson = sessionData.unmatchedERP ? JSON.stringify(sessionData.unmatchedERP) : null;
-  stmt.run(
-    id,
-    sessionData.name || null,
-    sessionData.bankFileName || "",
-    sessionData.erpFileName || "",
-    null,
-    matchedPairsJson,
-    unmatchedBankJson,
-    unmatchedErpJson,
-    sessionData.matchPercentage || 0,
-    1,
-    now,
-    now
-  );
-  return id;
+function _(e) {
+	let t = l(), n = crypto.randomUUID(), r = (/* @__PURE__ */ new Date()).toISOString(), i = t.prepare("\n    INSERT INTO sessions (\n      id, name, bank_file_name, erp_file_name, rules_id, rules_json,\n      matched_pairs_json, unmatched_bank_json, unmatched_erp_json,\n      match_percentage, is_active, created_at, updated_at\n    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n  "), a = e.matchedPairs ? JSON.stringify(e.matchedPairs) : null, o = e.unmatchedBank ? JSON.stringify(e.unmatchedBank) : null, s = e.unmatchedERP ? JSON.stringify(e.unmatchedERP) : null, c = e.isActive === void 0 ? 1 : +!!e.isActive, u = e.rules ? JSON.stringify(e.rules) : null;
+	return i.run(n, e.name || null, e.bankFileName || "", e.erpFileName || "", null, u, a, o, s, e.matchPercentage || 0, c, r, r), n;
 }
-function updateSession(sessionId, updates) {
-  const database = getDatabase();
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const matchedPairsJson = updates.matchedPairs ? JSON.stringify(updates.matchedPairs) : void 0;
-  const unmatchedBankJson = updates.unmatchedBank ? JSON.stringify(updates.unmatchedBank) : void 0;
-  const unmatchedErpJson = updates.unmatchedERP ? JSON.stringify(updates.unmatchedERP) : void 0;
-  const setParts = [];
-  const params = [];
-  if (updates.name !== void 0) {
-    setParts.push("name = ?");
-    params.push(updates.name);
-  }
-  if (matchedPairsJson !== void 0) {
-    setParts.push("matched_pairs_json = ?");
-    params.push(matchedPairsJson);
-  }
-  if (unmatchedBankJson !== void 0) {
-    setParts.push("unmatched_bank_json = ?");
-    params.push(unmatchedBankJson);
-  }
-  if (unmatchedErpJson !== void 0) {
-    setParts.push("unmatched_erp_json = ?");
-    params.push(unmatchedErpJson);
-  }
-  if (updates.matchPercentage !== void 0) {
-    setParts.push("match_percentage = ?");
-    params.push(updates.matchPercentage);
-  }
-  if (updates.isActive !== void 0) {
-    setParts.push("is_active = ?");
-    params.push(updates.isActive ? 1 : 0);
-  }
-  if (setParts.length === 0) return;
-  setParts.push("updated_at = ?");
-  params.push(now);
-  params.push(sessionId);
-  const query = `UPDATE sessions SET ${setParts.join(", ")} WHERE id = ?`;
-  const stmt = database.prepare(query);
-  stmt.run(...params);
+function v(e, t) {
+	let n = l(), r = (/* @__PURE__ */ new Date()).toISOString(), i = t.matchedPairs ? JSON.stringify(t.matchedPairs) : void 0, a = t.unmatchedBank ? JSON.stringify(t.unmatchedBank) : void 0, o = t.unmatchedERP ? JSON.stringify(t.unmatchedERP) : void 0, s = t.rules ? JSON.stringify(t.rules) : void 0, c = [], u = [];
+	if (t.name !== void 0 && (c.push("name = ?"), u.push(t.name)), i !== void 0 && (c.push("matched_pairs_json = ?"), u.push(i)), a !== void 0 && (c.push("unmatched_bank_json = ?"), u.push(a)), o !== void 0 && (c.push("unmatched_erp_json = ?"), u.push(o)), s !== void 0 && (c.push("rules_json = ?"), u.push(s)), t.matchPercentage !== void 0 && (c.push("match_percentage = ?"), u.push(t.matchPercentage)), t.isActive !== void 0 && (c.push("is_active = ?"), u.push(+!!t.isActive)), c.length === 0) return;
+	c.push("updated_at = ?"), u.push(r), u.push(e);
+	let d = `UPDATE sessions SET ${c.join(", ")} WHERE id = ?`;
+	n.prepare(d).run(...u);
 }
-function getActiveSessions() {
-  const database = getDatabase();
-  const stmt = database.prepare("SELECT * FROM sessions WHERE is_active = 1 ORDER BY created_at DESC");
-  const rows = stmt.all();
-  return rows.map(parseSessionRow);
+function y() {
+	return l().prepare("SELECT * FROM sessions WHERE is_active = 1 ORDER BY created_at DESC").all().map(w);
 }
-function getSessionById(sessionId) {
-  const database = getDatabase();
-  const stmt = database.prepare("SELECT * FROM sessions WHERE id = ?");
-  const row = stmt.get(sessionId);
-  return row ? parseSessionRow(row) : null;
+function b(e) {
+	let t = l().prepare("SELECT * FROM sessions WHERE id = ?").get(e);
+	return t ? w(t) : null;
 }
-function getAllSessions() {
-  const database = getDatabase();
-  const stmt = database.prepare("SELECT * FROM sessions ORDER BY created_at DESC");
-  const rows = stmt.all();
-  return rows.map(parseSessionRow);
+function x() {
+	return l().prepare("SELECT * FROM sessions ORDER BY created_at DESC").all().map(w);
 }
-function closeSession(sessionId) {
-  const database = getDatabase();
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const stmt = database.prepare("UPDATE sessions SET is_active = 0, updated_at = ? WHERE id = ?");
-  stmt.run(now, sessionId);
+function S(e) {
+	let t = l(), n = (/* @__PURE__ */ new Date()).toISOString();
+	t.prepare("UPDATE sessions SET is_active = 0, updated_at = ? WHERE id = ?").run(n, e);
 }
-function deleteSession(sessionId) {
-  const database = getDatabase();
-  const histStmt = database.prepare("DELETE FROM history WHERE session_id = ?");
-  histStmt.run(sessionId);
-  const sessStmt = database.prepare("DELETE FROM sessions WHERE id = ?");
-  sessStmt.run(sessionId);
+function C(e) {
+	let t = l();
+	t.prepare("DELETE FROM history WHERE session_id = ?").run(e), t.prepare("DELETE FROM sessions WHERE id = ?").run(e);
 }
-function parseSessionRow(row) {
-  return {
-    id: row.id,
-    name: row.name,
-    bankFileName: row.bank_file_name,
-    erpFileName: row.erp_file_name,
-    rules: row.rules_json ? JSON.parse(row.rules_json) : [],
-    matchedPairs: row.matched_pairs_json ? JSON.parse(row.matched_pairs_json) : [],
-    unmatchedBank: row.unmatched_bank_json ? JSON.parse(row.unmatched_bank_json) : [],
-    unmatchedERP: row.unmatched_erp_json ? JSON.parse(row.unmatched_erp_json) : [],
-    matchPercentage: row.match_percentage,
-    isActive: Boolean(row.is_active),
-    createdAt: new Date(row.created_at),
-    updatedAt: new Date(row.updated_at)
-  };
+function w(e) {
+	return {
+		id: e.id,
+		name: e.name,
+		bankFileName: e.bank_file_name,
+		erpFileName: e.erp_file_name,
+		rules: e.rules_json ? JSON.parse(e.rules_json) : [],
+		matchedPairs: e.matched_pairs_json ? JSON.parse(e.matched_pairs_json) : [],
+		unmatchedBank: e.unmatched_bank_json ? JSON.parse(e.unmatched_bank_json) : [],
+		unmatchedERP: e.unmatched_erp_json ? JSON.parse(e.unmatched_erp_json) : [],
+		matchPercentage: e.match_percentage,
+		isActive: !!e.is_active,
+		createdAt: new Date(e.created_at),
+		updatedAt: new Date(e.updated_at)
+	};
 }
-function savePreference(key, value) {
-  const database = getDatabase();
-  const valueJson = typeof value === "string" ? value : JSON.stringify(value);
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const updateStmt = database.prepare("UPDATE preferences SET value = ?, updated_at = ? WHERE key = ?");
-  const result = updateStmt.run(valueJson, now, key);
-  if (result.changes === 0) {
-    const insertStmt = database.prepare("INSERT INTO preferences (key, value, updated_at) VALUES (?, ?, ?)");
-    insertStmt.run(key, valueJson, now);
-  }
+function T(e, t) {
+	let n = l(), r = typeof t == "string" ? t : JSON.stringify(t), i = (/* @__PURE__ */ new Date()).toISOString();
+	n.prepare("UPDATE preferences SET value = ?, updated_at = ? WHERE key = ?").run(r, i, e).changes === 0 && n.prepare("INSERT INTO preferences (key, value, updated_at) VALUES (?, ?, ?)").run(e, r, i);
 }
-function getPreference(key) {
-  const database = getDatabase();
-  const stmt = database.prepare("SELECT value FROM preferences WHERE key = ?");
-  const row = stmt.get(key);
-  if (!row) return null;
-  try {
-    return JSON.parse(row.value);
-  } catch {
-    return row.value;
-  }
+function E(e) {
+	let t = l().prepare("SELECT value FROM preferences WHERE key = ?").get(e);
+	if (!t) return null;
+	try {
+		return JSON.parse(t.value);
+	} catch {
+		return t.value;
+	}
 }
-function getAllPreferences() {
-  const database = getDatabase();
-  const stmt = database.prepare("SELECT key, value FROM preferences");
-  const rows = stmt.all();
-  const preferences = {};
-  for (const row of rows) {
-    try {
-      preferences[row.key] = JSON.parse(row.value);
-    } catch {
-      preferences[row.key] = row.value;
-    }
-  }
-  return preferences;
+function D() {
+	let e = l().prepare("SELECT key, value FROM preferences").all(), t = {};
+	for (let n of e) try {
+		t[n.key] = JSON.parse(n.value);
+	} catch {
+		t[n.key] = n.value;
+	}
+	return t;
 }
-function deletePreference(key) {
-  const database = getDatabase();
-  const stmt = database.prepare("DELETE FROM preferences WHERE key = ?");
-  stmt.run(key);
+function O(e) {
+	l().prepare("DELETE FROM preferences WHERE key = ?").run(e);
 }
-function logHistory(event) {
-  const database = getDatabase();
-  const eventDataJson = JSON.stringify(event.eventData);
-  const stmt = database.prepare(`
-    INSERT INTO history (session_id, event_type, event_data, timestamp)
-    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-  `);
-  stmt.run(event.sessionId || null, event.eventType, eventDataJson);
+function k(e) {
+	let t = l(), n = JSON.stringify(e.eventData);
+	t.prepare("\n    INSERT INTO history (session_id, event_type, event_data, timestamp)\n    VALUES (?, ?, ?, CURRENT_TIMESTAMP)\n  ").run(e.sessionId || null, e.eventType, n);
 }
-function getSessionHistory(sessionId) {
-  const database = getDatabase();
-  const stmt = database.prepare("SELECT * FROM history WHERE session_id = ? ORDER BY timestamp");
-  const rows = stmt.all(sessionId);
-  return rows.map((row) => ({
-    id: row.id,
-    sessionId: row.session_id,
-    eventType: row.event_type,
-    eventData: JSON.parse(row.event_data),
-    timestamp: new Date(row.timestamp)
-  }));
+function A(e) {
+	return l().prepare("SELECT * FROM history WHERE session_id = ? ORDER BY timestamp").all(e).map((e) => ({
+		id: e.id,
+		sessionId: e.session_id,
+		eventType: e.event_type,
+		eventData: JSON.parse(e.event_data),
+		timestamp: new Date(e.timestamp)
+	}));
 }
-function getAllHistory(limit) {
-  const database = getDatabase();
-  const query = limit ? "SELECT * FROM history ORDER BY timestamp DESC LIMIT ?" : "SELECT * FROM history ORDER BY timestamp DESC";
-  const stmt = database.prepare(query);
-  const rows = limit ? stmt.all(limit) : stmt.all();
-  return rows.map((row) => ({
-    id: row.id,
-    sessionId: row.session_id,
-    eventType: row.event_type,
-    eventData: JSON.parse(row.event_data),
-    timestamp: new Date(row.timestamp)
-  }));
+function j(e) {
+	let t = l(), n = e ? "SELECT * FROM history ORDER BY timestamp DESC LIMIT ?" : "SELECT * FROM history ORDER BY timestamp DESC", r = t.prepare(n);
+	return (e ? r.all(e) : r.all()).map((e) => ({
+		id: e.id,
+		sessionId: e.session_id,
+		eventType: e.event_type,
+		eventData: JSON.parse(e.event_data),
+		timestamp: new Date(e.timestamp)
+	}));
 }
-function vacuumDatabase() {
-  const database = getDatabase();
-  database.exec("VACUUM");
+function M() {
+	l().exec("VACUUM");
 }
-function optimizeDatabase() {
-  const database = getDatabase();
-  database.exec("ANALYZE");
+function N() {
+	l().exec("ANALYZE");
 }
-function closeDatabase() {
-  if (db) {
-    db.close();
-    db = null;
-  }
+function P() {
+	c &&= (c.close(), null);
 }
-const __dirname$1 = path$1.dirname(fileURLToPath(import.meta.url));
-process.env.APP_ROOT = path$1.join(__dirname$1, "..");
-const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
-const MAIN_DIST = path$1.join(process.env.APP_ROOT, "dist-electron");
-const RENDERER_DIST = path$1.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path$1.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
-let win;
-function createWindow() {
-  win = new BrowserWindow({
-    icon: path$1.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
-    webPreferences: {
-      preload: path$1.join(__dirname$1, "preload.mjs")
-    }
-  });
-  win.webContents.on("did-finish-load", () => {
-    win?.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
-  });
-  if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL);
-  } else {
-    win.loadFile(path$1.join(RENDERER_DIST, "index.html"));
-  }
+//#endregion
+//#region electron/main.ts
+var F = i.dirname(r(import.meta.url));
+process.env.APP_ROOT = i.join(F, "..");
+var I = process.env.VITE_DEV_SERVER_URL, L = i.join(process.env.APP_ROOT, "dist-electron"), R = i.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = I ? i.join(process.env.APP_ROOT, "public") : R;
+var z;
+function B() {
+	z = new e({
+		icon: i.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
+		webPreferences: { preload: i.join(F, "preload.mjs") }
+	}), z.webContents.on("did-finish-load", () => {
+		z?.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+	}), I ? z.loadURL(I) : z.loadFile(i.join(R, "index.html"));
 }
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-    win = null;
-  }
-});
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
-});
-ipcMain.handle("db:saveRule", (_event, mappingRules, name, description) => {
-  try {
-    return saveRule(mappingRules, name, description);
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:loadRules", () => {
-  try {
-    return loadRules();
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:getRuleById", (_event, ruleId) => {
-  try {
-    return getRuleById(ruleId);
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:updateRule", (_event, ruleId, name, description, mappingRules) => {
-  try {
-    updateRule(ruleId, name, description, mappingRules);
-    return { success: true };
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:deleteRule", (_event, ruleId) => {
-  try {
-    deleteRule(ruleId);
-    return { success: true };
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:duplicateRule", (_event, sourceRuleId, newName) => {
-  try {
-    return duplicateRule(sourceRuleId, newName);
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:saveSession", (_event, sessionData) => {
-  try {
-    return saveSession(sessionData);
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:updateSession", (_event, sessionId, updates) => {
-  try {
-    updateSession(sessionId, updates);
-    return { success: true };
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:getActiveSessions", () => {
-  try {
-    return getActiveSessions();
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:getSessionById", (_event, sessionId) => {
-  try {
-    return getSessionById(sessionId);
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:getAllSessions", () => {
-  try {
-    return getAllSessions();
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:closeSession", (_event, sessionId) => {
-  try {
-    closeSession(sessionId);
-    return { success: true };
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:deleteSession", (_event, sessionId) => {
-  try {
-    deleteSession(sessionId);
-    return { success: true };
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:savePreference", (_event, key, value) => {
-  try {
-    savePreference(key, value);
-    return { success: true };
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:getPreference", (_event, key) => {
-  try {
-    return getPreference(key);
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:getAllPreferences", () => {
-  try {
-    return getAllPreferences();
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:deletePreference", (_event, key) => {
-  try {
-    deletePreference(key);
-    return { success: true };
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:logHistory", (_event, event) => {
-  try {
-    logHistory(event);
-    return { success: true };
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:getSessionHistory", (_event, sessionId) => {
-  try {
-    return getSessionHistory(sessionId);
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:getAllHistory", (_event, limit) => {
-  try {
-    return getAllHistory(limit);
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:vacuum", () => {
-  try {
-    vacuumDatabase();
-    return { success: true };
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-ipcMain.handle("db:optimize", () => {
-  try {
-    optimizeDatabase();
-    return { success: true };
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-app.on("before-quit", () => {
-  closeDatabase();
-});
-app.whenReady().then(createWindow);
-export {
-  MAIN_DIST,
-  RENDERER_DIST,
-  VITE_DEV_SERVER_URL
-};
+t.on("window-all-closed", () => {
+	process.platform !== "darwin" && (t.quit(), z = null);
+}), t.on("activate", () => {
+	e.getAllWindows().length === 0 && B();
+}), n.handle("db:saveRule", (e, t, n, r) => {
+	try {
+		return d(t, n, r);
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:loadRules", () => {
+	try {
+		return f();
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:getRuleById", (e, t) => {
+	try {
+		return p(t);
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:updateRule", (e, t, n, r, i) => {
+	try {
+		return m(t, n, r, i), { success: !0 };
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:deleteRule", (e, t) => {
+	try {
+		return h(t), { success: !0 };
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:duplicateRule", (e, t, n) => {
+	try {
+		return g(t, n);
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:saveSession", (e, t) => {
+	try {
+		return _(t);
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:updateSession", (e, t, n) => {
+	try {
+		return v(t, n), { success: !0 };
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:getActiveSessions", () => {
+	try {
+		return y();
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:getSessionById", (e, t) => {
+	try {
+		return b(t);
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:getAllSessions", () => {
+	try {
+		return x();
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:closeSession", (e, t) => {
+	try {
+		return S(t), { success: !0 };
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:deleteSession", (e, t) => {
+	try {
+		return C(t), { success: !0 };
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:savePreference", (e, t, n) => {
+	try {
+		return T(t, n), { success: !0 };
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:getPreference", (e, t) => {
+	try {
+		return E(t);
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:getAllPreferences", () => {
+	try {
+		return D();
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:deletePreference", (e, t) => {
+	try {
+		return O(t), { success: !0 };
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:logHistory", (e, t) => {
+	try {
+		return k(t), { success: !0 };
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:getSessionHistory", (e, t) => {
+	try {
+		return A(t);
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:getAllHistory", (e, t) => {
+	try {
+		return j(t);
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:vacuum", () => {
+	try {
+		return M(), { success: !0 };
+	} catch (e) {
+		return { error: e.message };
+	}
+}), n.handle("db:optimize", () => {
+	try {
+		return N(), { success: !0 };
+	} catch (e) {
+		return { error: e.message };
+	}
+}), t.on("before-quit", () => {
+	P();
+}), t.whenReady().then(B);
+//#endregion
+export { L as MAIN_DIST, R as RENDERER_DIST, I as VITE_DEV_SERVER_URL };

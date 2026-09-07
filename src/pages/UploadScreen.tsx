@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileDropzone } from '../components/FileDropzone';
 import { Toast } from '../components/Toast';
@@ -17,10 +17,10 @@ export const UploadScreen = () => {
   const { isProcessing, error, parsedData, processFiles, reset } = useFileParser();
   const { lastSession, hasRecoverySession } = useSessionRecovery();
 
-  // Handle errors emitted by parser hook
-  if (error && !toast.show) {
-    setToast({ show: true, msg: error, type: 'error' });
-  }
+  // Surface errors emitted by the parser hook.
+  useEffect(() => {
+    if (error) setToast({ show: true, msg: error, type: 'error' });
+  }, [error]);
 
   const handleContinue = () => {
     if (parsedData && bankFile && erpFile) {
@@ -78,10 +78,10 @@ export const UploadScreen = () => {
               <div className="flex-1">
                 <h3 className="text-lg font-bold text-blue-900 dark:text-blue-100 flex items-center mb-2">
                   <RotateCcw className="w-5 h-5 mr-2" />
-                  Session Recovery Available
+                  Continue last reconciliation
                 </h3>
                 <p className="text-blue-800 dark:text-blue-200 mb-2">
-                  We found an interrupted reconciliation session from{' '}
+                  Pick up where your last run left off, from{' '}
                   <span className="font-medium">{new Date(lastSession.updatedAt).toLocaleDateString()}</span>
                 </p>
                 <div className="flex gap-4 text-sm text-blue-700 dark:text-blue-300">
@@ -97,7 +97,7 @@ export const UploadScreen = () => {
                 onClick={handleResumeSession}
                 className="ml-4 px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors whitespace-nowrap"
               >
-                Resume Session
+                Continue
               </button>
             </div>
           </motion.div>
