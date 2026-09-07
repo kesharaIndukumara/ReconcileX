@@ -19,6 +19,7 @@ const TOLERANCE_OPTIONS: Record<ComparisonMode, { value: RuleTolerance['kind']; 
   ],
   numeric: [
     { value: 'exact', label: 'Exact' },
+    { value: 'blank-zero', label: 'Exact (blank = 0)' },
     { value: 'amount', label: 'Within ± amount', needsValue: true },
     { value: 'percent', label: 'Within ± %', needsValue: true },
   ],

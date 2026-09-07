@@ -2,13 +2,17 @@ export type ComparisonMode = 'numeric' | 'text' | 'date';
 
 /**
  * Optional per-rule slack. When absent, the rule is exact (v0.1 behaviour).
- * - numeric: `amount` (± absolute) or `percent` (± % of the larger value)
+ * - numeric: `amount` (± absolute), `percent` (± % of the larger value) or
+ *   `blank-zero` (exact, but an empty cell counts as 0 instead of failing the
+ *   rule — needed for cross-mapped Debit/Credit columns where the unused side
+ *   is left blank)
  * - date: `days` (± N calendar days)
  * - text: `normalized` (case/space-insensitive), `contains` (either side contains the
  *   other) or `alnum` (compare only letters and digits)
  */
 export type RuleTolerance =
   | { kind: 'exact' }
+  | { kind: 'blank-zero' }
   | { kind: 'amount'; value: number }
   | { kind: 'percent'; value: number }
   | { kind: 'days'; value: number }

@@ -92,6 +92,13 @@ describe('getRowSignature', () => {
     const emptySig = getRowSignature({ Amount: '' }, rules, 'bank')
     expect(zeroSig).not.toBe(emptySig)
   })
+
+  it('with blank-zero, an empty cell buckets with a real zero across sides', () => {
+    const bz = [{ ...numericRule('Amount', 'Credit'), tolerance: { kind: 'blank-zero' as const } }]
+    const emptyBankSig = getRowSignature({ Amount: '' }, bz, 'bank')
+    const zeroErpSig = getRowSignature({ Credit: '0' }, bz, 'erp')
+    expect(emptyBankSig).toBe(zeroErpSig)
+  })
 })
 
 describe('parseDateMs', () => {
@@ -121,6 +128,19 @@ describe('evaluateRule tolerances', () => {
     expect(evaluateRule(txt({ kind: 'normalized' }), '  ACME  Co ', 'acme co')).toBe(true)
     expect(evaluateRule(txt({ kind: 'contains' }), 'INV-100 payment', 'INV-100')).toBe(true)
     expect(evaluateRule(txt({ kind: 'alnum' }), 'INV/100', 'inv-100')).toBe(true)
+  })
+
+  it('blank-zero: an empty cell counts as 0 instead of failing the rule', () => {
+    expect(evaluateRule(num({ kind: 'blank-zero' }), '', '0')).toBe(true)
+    expect(evaluateRule(num({ kind: 'blank-zero' }), '', '')).toBe(true)
+    expect(evaluateRule(num({ kind: 'blank-zero' }), '0.00', '')).toBe(true)
+    expect(evaluateRule(num({ kind: 'blank-zero' }), '500', '500')).toBe(true)
+    expect(evaluateRule(num({ kind: 'blank-zero' }), '', '500')).toBe(false)
+    expect(evaluateRule(num({ kind: 'blank-zero' }), 'n/a', '')).toBe(false)
+  })
+
+  it('blank-zero does not leak into a plain exact numeric rule', () => {
+    expect(evaluateRule(num({ kind: 'exact' }), '', '0')).toBe(false)
   })
 })
 

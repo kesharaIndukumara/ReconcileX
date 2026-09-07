@@ -33,6 +33,39 @@ describe('runReconciliation — exact pass', () => {
   })
 })
 
+describe('runReconciliation — cross-mapped Debit/Credit with blank-zero', () => {
+  // Bank keeps Debit/Credit in two columns; ERP mirrors them (its Credit answers
+  // the bank Debit and vice versa). The unused side is blank on every row.
+  const rules: MappingRule[] = [
+    rule({ bankColumn: 'Debit', erpColumn: 'CR', comparisonMode: 'numeric', tolerance: { kind: 'blank-zero' } }),
+    rule({ bankColumn: 'Credit', erpColumn: 'DR', comparisonMode: 'numeric', tolerance: { kind: 'blank-zero' } }),
+    rule({ bankColumn: 'Ref', erpColumn: 'Ref', comparisonMode: 'text', tolerance: { kind: 'alnum' } }),
+  ]
+
+  it('pairs a debit and a credit row in the exact pass despite the blank halves', () => {
+    const bank: TransactionRow[] = [
+      { Debit: '500.00', Credit: '', Ref: 'INV-100' },
+      { Debit: '', Credit: '80', Ref: 'REF/7' },
+    ]
+    const erp: TransactionRow[] = [
+      { DR: '', CR: '500', Ref: 'inv100' },
+      { DR: '80.00', CR: '', Ref: 'ref7' },
+    ]
+    const out = runReconciliation({ bankData: bank, erpData: erp, rules, duplicateStrategy: 'first-wins' })
+    expect(out.matched).toHaveLength(2)
+    expect(out.matched.every(m => m.kind === 'exact')).toBe(true)
+    expect(out.unmatchedBank).toHaveLength(0)
+    expect(out.unmatchedERP).toHaveLength(0)
+  })
+
+  it('still rejects a row whose amount actually differs', () => {
+    const bank: TransactionRow[] = [{ Debit: '500', Credit: '', Ref: 'A' }]
+    const erp: TransactionRow[] = [{ DR: '', CR: '501', Ref: 'A' }]
+    const out = runReconciliation({ bankData: bank, erpData: erp, rules, duplicateStrategy: 'first-wins' })
+    expect(out.matched).toHaveLength(0)
+  })
+})
+
 describe('runReconciliation — fuzzy pass', () => {
   it('is skipped entirely when no rule has tolerance', () => {
     const bank: TransactionRow[] = [{ Amount: '100.02' }]

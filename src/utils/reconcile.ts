@@ -1,4 +1,4 @@
-import { MappingRule, TransactionRow } from '../types';
+import { MappingRule, RuleTolerance, TransactionRow } from '../types';
 import { NUMERIC_EPSILON } from './constants';
 
 const INVALID_NUMERIC_PREFIX = '__INVALID_NUMERIC__';
@@ -18,6 +18,18 @@ export const normalizeNumeric = (raw: string): number | null => {
   if (Number.isNaN(num)) return null;
   return Math.round(num * 100) / 100;
 };
+
+/**
+ * Like {@link normalizeNumeric}, but a blank cell resolves to 0 rather than null.
+ * Junk (non-numeric, non-empty) still returns null. Used by the `blank-zero`
+ * tolerance so a Debit rule can match when the Credit side of that row is empty.
+ */
+const numericBlankAsZero = (raw: string): number | null =>
+  raw.replace(/,/g, '').trim() === '' ? 0 : normalizeNumeric(raw);
+
+/** Parser for a numeric rule's raw cells, chosen by its tolerance. */
+const numericParserFor = (tol: RuleTolerance): ((raw: string) => number | null) =>
+  tol.kind === 'blank-zero' ? numericBlankAsZero : normalizeNumeric;
 
 /** Best-effort date parsing: Date, ISO, and d/m/y or m/d/y. Returns epoch ms or null. */
 export const parseDateMs = (raw: string | number | Date | undefined): number | null => {
@@ -64,8 +76,9 @@ export const evaluateRule = (rule: MappingRule, bankRaw: string, erpRaw: string)
   }
 
   if (rule.comparisonMode === 'numeric') {
-    const a = normalizeNumeric(bankVal);
-    const b = normalizeNumeric(erpVal);
+    const parse = numericParserFor(tol);
+    const a = parse(bankVal);
+    const b = parse(erpVal);
     if (a === null || b === null) return false;
     const diff = Math.abs(a - b);
     if (tol.kind === 'amount') return diff <= Math.abs(tol.value) + NUMERIC_EPSILON;
@@ -91,8 +104,11 @@ export const evaluateRule = (rule: MappingRule, bankRaw: string, erpRaw: string)
 };
 
 /**
- * Signature for exact-key bucketing (the strict first pass). Tolerant rules still
- * contribute their raw normalised value here — the fuzzy pass handles slack separately.
+ * Signature for exact-key bucketing (the strict first pass). Tolerances that only
+ * canonicalise a value (numeric `blank-zero`, text `normalized` / `alnum`) are
+ * baked into the signature so those rules still resolve in the fast pass. Slack
+ * tolerances (`amount` / `percent` / `days` / text `contains`) contribute the raw
+ * value — the fuzzy pass handles their give.
  */
 export const getRowSignature = (
   row: TransactionRow,
@@ -106,11 +122,15 @@ export const getRowSignature = (
     const val = String(row[fieldName] ?? '').trim();
 
     if (rule.comparisonMode === 'numeric') {
-      const numericVal = normalizeNumeric(val);
+      const numericVal = numericParserFor(rule.tolerance ?? { kind: 'exact' })(val);
       parts.push(numericVal === null ? `${INVALID_NUMERIC_PREFIX}${rowType}` : numericVal.toFixed(2));
     } else if (rule.comparisonMode === 'date') {
       const ms = parseDateMs(val);
       parts.push(ms === null ? `${INVALID_NUMERIC_PREFIX}date_${rowType}` : String(Math.round(ms / MS_PER_DAY)));
+    } else if (rule.tolerance?.kind === 'normalized') {
+      parts.push(normalizeText(val));
+    } else if (rule.tolerance?.kind === 'alnum') {
+      parts.push(alnum(val));
     } else {
       parts.push(val.toLowerCase());
     }
