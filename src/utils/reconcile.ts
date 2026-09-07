@@ -54,6 +54,22 @@ export const getRowSignature = (
 };
 
 /**
+ * A short human-readable rendering of the mapped values of a row, e.g.
+ * `Amount=1250 · Ref=INV-1`. Used to label duplicate groups and unmatched rows.
+ */
+export const describeRow = (
+  row: TransactionRow,
+  rules: MappingRule[],
+  side: 'bank' | 'erp'
+): string =>
+  rules
+    .map(rule => {
+      const col = side === 'bank' ? rule.bankColumn : rule.erpColumn;
+      return `${col}=${String(row[col] ?? '').trim() || '∅'}`;
+    })
+    .join(' · ');
+
+/**
  * Validates if two specific transaction rows match on every mapping rule.
  */
 export const evaluateMatch = (

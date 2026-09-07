@@ -1,14 +1,39 @@
 import { useState, useEffect } from 'react';
-import { ReconciliationState, ReconciliationResults, TransactionRow } from '../types';
-import { getRowSignature } from '../utils/reconcile';
+import {
+  ReconciliationState,
+  ReconciliationResults,
+  TransactionRow,
+  DuplicateGroup,
+  DuplicateSummary,
+  DuplicateStrategy,
+} from '../types';
+import { getRowSignature, describeRow } from '../utils/reconcile';
 
-export const useReconciliation = (state: ReconciliationState | null) => {
+interface UseReconciliationOptions {
+  /** How to treat rows that share a signature within one side. Default: 'first-wins'. */
+  duplicateStrategy?: DuplicateStrategy;
+}
+
+const emptyResults: ReconciliationResults = {
+  matched: [], unmatchedBank: [], unmatchedERP: [], progress: 0, bankMatchRate: 0, erpMatchRate: 0,
+};
+
+const emptyDupSummary: DuplicateSummary = { groups: 0, extras: 0 };
+
+export const useReconciliation = (
+  state: ReconciliationState | null,
+  options: UseReconciliationOptions = {}
+) => {
+  const { duplicateStrategy = 'first-wins' } = options;
+
   const [isProcessing, setIsProcessing] = useState(true);
   const [processingProgress, setProcessingProgress] = useState(0);
-  const [duplicateWarnings, setDuplicateWarnings] = useState<{ type: 'bank' | 'erp', count: number }[]>([]);
-  const [results, setResults] = useState<ReconciliationResults>({
-    matched: [], unmatchedBank: [], unmatchedERP: [], progress: 0, bankMatchRate: 0, erpMatchRate: 0,
+  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
+  const [duplicateSummary, setDuplicateSummary] = useState<{ bank: DuplicateSummary; erp: DuplicateSummary }>({
+    bank: emptyDupSummary,
+    erp: emptyDupSummary,
   });
+  const [results, setResults] = useState<ReconciliationResults>(emptyResults);
 
   useEffect(() => {
     if (!state) return;
@@ -16,126 +41,138 @@ export const useReconciliation = (state: ReconciliationState | null) => {
     let isMounted = true;
     const bankItems = [...state.parsedData.bankData];
     const erpItems = [...state.parsedData.erpData];
-    
-    // ========== Phase 1: Duplicate Detection ==========
-    const bankSignatures = new Map<string, number>();
-    let bankDuplicatesCount = 0;
-    for (const row of bankItems) {
-      const sig = getRowSignature(row, state.rules, 'bank');
-      const count = bankSignatures.get(sig) || 0;
-      if (count >= 1) bankDuplicatesCount++;
-      bankSignatures.set(sig, count + 1);
-    }
+    const { rules } = state;
 
-    const erpSignatures = new Map<string, number>();
-    let erpDuplicatesCount = 0;
-    for (const row of erpItems) {
-      const sig = getRowSignature(row, state.rules, 'erp');
-      const count = erpSignatures.get(sig) || 0;
-      if (count >= 1) erpDuplicatesCount++;
-      erpSignatures.set(sig, count + 1);
-    }
+    // ========== Phase 1: Group each side by signature ==========
+    const groupBySignature = (rows: TransactionRow[], side: 'bank' | 'erp') => {
+      const bySig = new Map<string, TransactionRow[]>();
+      for (const row of rows) {
+        const sig = getRowSignature(row, rules, side);
+        const bucket = bySig.get(sig);
+        if (bucket) bucket.push(row);
+        else bySig.set(sig, [row]);
+      }
+      return bySig;
+    };
 
-    const warnings: { type: 'bank' | 'erp', count: number }[] = [];
-    if (bankDuplicatesCount > 0) warnings.push({ type: 'bank', count: bankDuplicatesCount });
-    if (erpDuplicatesCount > 0) warnings.push({ type: 'erp', count: erpDuplicatesCount });
-    setDuplicateWarnings(warnings);
+    const bankBySig = groupBySignature(bankItems, 'bank');
+    const erpBySig = groupBySignature(erpItems, 'erp');
+
+    const summarise = (bySig: Map<string, TransactionRow[]>): DuplicateSummary => {
+      let groups = 0;
+      let extras = 0;
+      for (const bucket of bySig.values()) {
+        if (bucket.length > 1) {
+          groups += 1;
+          extras += bucket.length - 1;
+        }
+      }
+      return { groups, extras };
+    };
+
+    setDuplicateSummary({ bank: summarise(bankBySig), erp: summarise(erpBySig) });
+
+    const collectGroups = (bySig: Map<string, TransactionRow[]>, side: 'bank' | 'erp'): DuplicateGroup[] => {
+      const out: DuplicateGroup[] = [];
+      for (const bucket of bySig.values()) {
+        if (bucket.length > 1) {
+          out.push({ side, label: describeRow(bucket[0], rules, side), rows: bucket });
+        }
+      }
+      return out;
+    };
+
+    setDuplicateGroups([...collectGroups(bankBySig, 'bank'), ...collectGroups(erpBySig, 'erp')]);
 
     const totalRecords = bankItems.length;
     const erpTotalRecords = erpItems.length;
 
     if (totalRecords === 0) {
-       setResults({
-         matched: [], unmatchedBank: [], unmatchedERP: erpItems,
-         progress: 0, bankMatchRate: 0, erpMatchRate: 0,
-       });
-       setIsProcessing(false);
-       return;
+      setResults({ ...emptyResults, unmatchedERP: erpItems });
+      setIsProcessing(false);
+      return;
     }
 
-    // ========== Phase 2: Build ERP Lookup Map (O(m)) ==========
-    // Group ERP rows by their signature for O(1) lookup during matching.
-    // Each signature maps to an array of rows to handle duplicates correctly —
-    // when a bank row matches, we consume (shift) one ERP row from that bucket.
+    // ========== Phase 2: Build the ERP lookup ==========
+    // Under 'all-unmatched', a signature that repeats on either side is "poisoned":
+    // none of its rows may match, they all fall through to the unmatched lists.
+    const poisoned = new Set<string>();
+    if (duplicateStrategy === 'all-unmatched') {
+      for (const [sig, bucket] of bankBySig) if (bucket.length > 1) poisoned.add(sig);
+      for (const [sig, bucket] of erpBySig) if (bucket.length > 1) poisoned.add(sig);
+    }
+
     const erpBuckets = new Map<string, TransactionRow[]>();
-    for (const row of erpItems) {
-      const sig = getRowSignature(row, state.rules, 'erp');
-      if (!erpBuckets.has(sig)) {
-        erpBuckets.set(sig, []);
-      }
-      erpBuckets.get(sig)!.push(row);
+    for (const [sig, bucket] of erpBySig) {
+      erpBuckets.set(sig, poisoned.has(sig) ? [] : [...bucket]);
+    }
+    // Rows held out of matching by the poison rule still need to reach unmatchedERP.
+    const heldOutErp: TransactionRow[] = [];
+    if (poisoned.size > 0) {
+      for (const [sig, bucket] of erpBySig) if (poisoned.has(sig)) heldOutErp.push(...bucket);
     }
 
-    // ========== Phase 3: Match Bank Rows via Map Lookup (O(n)) ==========
+    // ========== Phase 3: Match bank rows via map lookup (O(n)) ==========
     const matchedItems: ReconciliationResults['matched'] = [];
     const unmatchedBankItems: ReconciliationResults['unmatchedBank'] = [];
 
     let currentIndex = 0;
 
     const processChunk = () => {
-      const chunkSize = 200; // Larger chunks are fine now — no inner loop
+      const chunkSize = 500;
       const end = Math.min(currentIndex + chunkSize, totalRecords);
 
       for (let i = currentIndex; i < end; i++) {
         const bankRow = bankItems[i];
-        const sig = getRowSignature(bankRow, state.rules, 'bank');
-        const bucket = erpBuckets.get(sig);
+        const sig = getRowSignature(bankRow, rules, 'bank');
+        const bucket = poisoned.has(sig) ? undefined : erpBuckets.get(sig);
 
         if (bucket && bucket.length > 0) {
-          // O(1) match: consume first available ERP row from this signature bucket
-          const erpRow = bucket.shift()!;
-          matchedItems.push({ bank: bankRow, erp: erpRow });
-
-          // Clean up empty buckets
-          if (bucket.length === 0) {
-            erpBuckets.delete(sig);
-          }
+          matchedItems.push({ bank: bankRow, erp: bucket.shift()! });
+          if (bucket.length === 0) erpBuckets.delete(sig);
         } else {
           unmatchedBankItems.push(bankRow);
         }
       }
 
       currentIndex = end;
-
       if (!isMounted) return;
 
       if (currentIndex < totalRecords) {
         setProcessingProgress(Math.round((currentIndex / totalRecords) * 100));
-        setTimeout(processChunk, 5);
+        setTimeout(processChunk, 0);
       } else {
         setProcessingProgress(100);
-        setTimeout(() => {
-          if (!isMounted) return;
 
-          // Collect remaining unmatched ERP rows from all non-empty buckets
-          const unmatchedERPItems: TransactionRow[] = [];
-          for (const bucket of erpBuckets.values()) {
-            unmatchedERPItems.push(...bucket);
-          }
+        const unmatchedERPItems: TransactionRow[] = [...heldOutErp];
+        for (const bucket of erpBuckets.values()) unmatchedERPItems.push(...bucket);
 
-          const matchedCount = matchedItems.length;
-          const combinedTotal = totalRecords + erpTotalRecords;
-          setResults({
-            matched: matchedItems,
-            unmatchedBank: unmatchedBankItems,
-            unmatchedERP: unmatchedERPItems,
-            // Combined rate counts each match once against both sides, so an ERP-heavy
-            // file can no longer read as "100%" while ERP rows go unmatched.
-            progress: combinedTotal > 0 ? Math.round((matchedCount * 2 * 100) / combinedTotal) : 0,
-            bankMatchRate: Math.round((matchedCount / totalRecords) * 100),
-            erpMatchRate: erpTotalRecords > 0 ? Math.round((matchedCount / erpTotalRecords) * 100) : 0,
-          });
-          setIsProcessing(false);
-        }, 500);
+        const matchedCount = matchedItems.length;
+        const combinedTotal = totalRecords + erpTotalRecords;
+        setResults({
+          matched: matchedItems,
+          unmatchedBank: unmatchedBankItems,
+          unmatchedERP: unmatchedERPItems,
+          // Combined rate counts each match once against both sides, so an ERP-heavy
+          // file can no longer read as "100%" while ERP rows go unmatched.
+          progress: combinedTotal > 0 ? Math.round((matchedCount * 2 * 100) / combinedTotal) : 0,
+          bankMatchRate: Math.round((matchedCount / totalRecords) * 100),
+          erpMatchRate: erpTotalRecords > 0 ? Math.round((matchedCount / erpTotalRecords) * 100) : 0,
+        });
+        // Keep the completion state visible for a beat so the bar reads 100%.
+        setTimeout(() => { if (isMounted) setIsProcessing(false); }, 400);
       }
     };
 
-    setTimeout(() => {
-      if (isMounted) processChunk();
-    }, 300);
+    setIsProcessing(true);
+    setProcessingProgress(0);
+    const startTimer = setTimeout(processChunk, 150);
 
-    return () => { isMounted = false; };
-  }, [state]);
+    return () => {
+      isMounted = false;
+      clearTimeout(startTimer);
+    };
+  }, [state, duplicateStrategy]);
 
-  return { isProcessing, processingProgress, results, duplicateWarnings };
+  return { isProcessing, processingProgress, results, duplicateGroups, duplicateSummary };
 };

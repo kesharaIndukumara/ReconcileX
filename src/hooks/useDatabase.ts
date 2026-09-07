@@ -8,13 +8,17 @@ export const useDatabase = useDbContext;
  * Hook for managing saved rule templates with convenient operations
  */
 export const useSavedRules = () => {
-  const { savedRules, loadingSavedRules, refreshRules, saveNewRule, deleteRuleAsync, duplicateRuleAsync } = useDatabase();
+  const {
+    savedRules, loadingSavedRules, refreshRules,
+    saveNewRule, updateRuleAsync, deleteRuleAsync, duplicateRuleAsync,
+  } = useDatabase();
 
   return {
     rules: savedRules,
     loading: loadingSavedRules,
     refresh: refreshRules,
     saveRule: saveNewRule,
+    updateRule: updateRuleAsync,
     deleteRule: deleteRuleAsync,
     duplicateRule: duplicateRuleAsync,
   };
@@ -209,7 +213,7 @@ export const useAutoSaveSession = (sessionId: string | null, enabled: boolean = 
  * Hook for managing rule templates with convenience methods
  */
 export const useRuleTemplates = () => {
-  const { rules, loading, refresh, saveRule, deleteRule, duplicateRule } = useSavedRules();
+  const { rules, loading, refresh, saveRule, updateRule, deleteRule, duplicateRule } = useSavedRules();
   const { getPreference, setPreference } = usePreferences();
 
   const saveAsTemplate = useCallback(
@@ -221,6 +225,12 @@ export const useRuleTemplates = () => {
       return ruleId;
     },
     [saveRule, setPreference]
+  );
+
+  const updateTemplate = useCallback(
+    (ruleId: string, name: string, description?: string, mappingRules?: MappingRule[]) =>
+      updateRule(ruleId, name, description, mappingRules),
+    [updateRule]
   );
 
   const getLastUsedTemplate = useCallback(() => {
@@ -243,6 +253,7 @@ export const useRuleTemplates = () => {
     loading,
     refresh,
     saveAsTemplate,
+    updateTemplate,
     deleteTemplate: deleteRule,
     duplicateTemplate: duplicateRule,
     getLastUsedTemplate,
