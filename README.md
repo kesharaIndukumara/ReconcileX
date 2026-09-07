@@ -1,58 +1,192 @@
-# 🏦 Bank & ERP Fast-Reconciliation Engine
+# 🏦 ReconcileX — Bank & ERP Reconciliation Engine
 
-A high-performance, gamified desktop application built to intelligently automate the matching process of Bank Statements against ERP Statements. Designed from the ground up for massive spreadsheets, the app utilizes chunking architectures, strict 1-to-1 processing guarantees, and pure client-side computing to keep financial data secure and processing speeds instantly responsive.
+A desktop application that automates matching **Bank statements** against **ERP statements**.
+You upload two spreadsheets, describe how their columns relate, and the engine
+resolves every row into **Matched**, **Unmatched (Bank only)**, or **Unmatched (ERP only)**
+under a strict 1‑to‑1 guarantee. File contents are parsed and matched locally on your
+machine; only lightweight metadata (rule templates, session summaries, preferences) is
+persisted, in a local SQLite database.
 
-## ✨ Core Features
+---
 
-* **Drag-and-Drop Parsing:** Convert massive `.xls`, `.xlsx`, and `.csv` files into JSON payloads directly inside the browser using optimized `ArrayBuffer` streaming.
-* **Intelligent Rule Mapping Engine:** Define complex matching rules dynamically. E.g., tell the system that `Amount` in the Bank file MUST EQUAL `Credit` in the ERP file.
-* **Comparison Modes & Comma Sanitation:** Set mapping columns as `Numeric` vs `Text` types. The engine intelligently strips commas from formatted currency strings to ensure pure mathematical (`Num === Num`) matching.
-* **Signature Duplicate Detection:** Before any math happens, the system hashes every row mathematically based on your rules. Identical data duplicates across the Bank or ERP sheets are immediately isolated and prominently flagged in a **Yellow Alert Top-Banner**, protecting strict 1-to-1 integrity.
-* **Strict 1-to-1 Matching Allocation:** The core iteration engine guarantees one discrete Bank action absorbs exactly one discrete ERP action. Excess duplicates gracefully cascade into the Unmatched tabs.
-* **Gamified High-Octane UI:** Wrapped in Framer Motion physics, `Lucide` icons, and Confetti cannons for 90%+ match rates.
-* **Report Exporting:** Download the exact resolved arrays (Matched, Unmatched Bank, Unmatched ERP) back down into a clean merged `.xlsx` workbook.
+## ✨ Features
 
-## 🛠️ Technology Stack
+- **Spreadsheet parsing** — drag‑and‑drop `.xls`, `.xlsx`, or `.csv` files. Parsing runs
+  in the renderer via SheetJS (`xlsx`), reading the first sheet of each workbook into JSON rows.
+- **Custom rule mapping** — pair any Bank column with any ERP column (`Bank.Amount` MUST EQUAL
+  `ERP.Credit`). Add multiple conditions; they are combined with **AND**.
+- **Text vs. Numeric comparison** — each rule is compared as `Text (Exact)` (case‑insensitive,
+  trimmed) or `Numeric`. Numeric mode strips thousands separators (`1,250.00` → `1250`) before
+  comparing values mathematically.
+- **Signature‑based duplicate detection** — every row is hashed into a signature from its mapped
+  fields. Rows with identical signatures on either side are counted and surfaced in a yellow
+  warning banner on the results screen.
+- **Strict 1‑to‑1 matching** — each Bank row consumes at most one ERP row with the same
+  signature. Surplus duplicates cascade into the Unmatched lists.
+- **Chunked processing** — matching is sliced into chunks of 200 rows with yields back to the
+  event loop, so the progress bar animates and the UI stays responsive on large files.
+- **Session persistence & recovery** — each run is saved to SQLite. If a session is interrupted,
+  the Upload screen offers a "Resume Session" banner to continue from the last saved state.
+- **Reusable rule templates** — save a set of mapping rules by name/description and reload them
+  on a later run.
+- **Preferences** — key/value preferences (e.g. theme) stored in the database.
+- **Excel export** — download a single `Reconciliation_Report.xlsx` workbook with three sheets:
+  `Matched`, `Unmatched Bank`, `Unmatched ERP`, each tagged with a `Match_Status` column.
+- **Gamified UI** — Framer Motion transitions, Lucide icons, and a confetti burst when the
+  combined match rate is great. Light/dark theme with an in-app toggle (seeded from the OS
+  setting, persisted to preferences). The whole router tree is wrapped in an `<ErrorBoundary />`.
 
-* **Core:** React 18, TypeScript, Vite
-* **Desktop Encapsulation:** Electron (with `electron-vite`) 
-* **State & Routing:** Hooks (`useState`, `useEffect`), React Router v6 (`MemoryRouter` for Electron execution)
-* **Design System:** Tailwind CSS (Dark Mode supported), UI composed visually with structured flex grids.
-* **Animations:** Framer Motion, React Confetti
-* **Data Processing:** `xlsx` (SheetJS Community) 
+---
 
-## 🏗️ Architecture & Code Strategy
+## 🛠️ Tech Stack
 
-To guarantee stability as feature requirements increased, the application is broken out strictly by Domain Driven principles:
+| Area | Choice |
+|------|--------|
+| UI | React 18, TypeScript 5, Vite 7 |
+| Desktop shell | Electron 41 via `vite-plugin-electron`, packaged with `electron-builder` |
+| Routing | `react-router-dom` v7 (`MemoryRouter` — no URL bar in Electron) |
+| Styling | Tailwind CSS v4 (`@tailwindcss/vite` plugin) |
+| Animation | Framer Motion, `react-confetti`, `react-use` |
+| Spreadsheets | `xlsx` (SheetJS Community, installed from the SheetJS CDN tarball) |
+| Local storage | SQLite via `better-sqlite3` (main process only) |
+| Tooling | ESLint (`@typescript-eslint`, `react-hooks`, `react-refresh`) |
 
-* **`/src/types/index.ts` :** All payload shapes and rule metadata are bound by Typescript models (e.g. `TransactionRow`, `MatchedPair`). No loose `any`.
-* **`/src/utils/reconcile.ts` :** The mathematical brain. The parsing `evaluateMatch` functions live here completely pure from the React DOM tree, allowing infinite theoretical unit testing without triggering browser engines. 
-* **`/src/hooks` :** 
-  * `useFileParser.ts` captures browser Native API callbacks isolating it from viewing screens.
-  * `useReconciliation.ts` controls asynchronous chunk processing. It slices 10k rows into arrays of `50`, handing thread space back to the UI to update the **Loading Bar**, preventing frozen DOMs.
-* **`/src/components` :** Total compositional breakdown. The Reconciliation screen invokes encapsulated visuals like `<StepIndicator />`, `<StatsCards />`, `<ProcessingOverlay />`, `<MatchRateBadge />`, and `<ResultsTable />`.
-* **`<ErrorBoundary />`:** The entire application router tree is wrapped inside a robust Error boundary preventing full visual crash-outs in Electron environments.
+---
+
+## 🏗️ Architecture
+
+The renderer does parsing, matching, and rendering. The Electron main process owns the SQLite
+database and exposes it to the renderer over a typed IPC bridge (`window.db`).
+
+```
+electron/
+  main.ts       Electron entry; registers all `db:*` IPC handlers
+  preload.ts    contextBridge — exposes `window.ipcRenderer` and `window.db`
+  db.ts         better-sqlite3 setup + CRUD for rules, sessions, preferences, history
+
+src/
+  types/index.ts          Shared models: MappingRule, TransactionRow, MatchedPair,
+                          ReconciliationSession, SavedRule, HistoryEvent
+  utils/reconcile.ts      Pure matching logic — getRowSignature() and evaluateMatch()
+  hooks/
+    useFileParser.ts      Reads File objects → TransactionRow[] via FileReader + xlsx
+    useReconciliation.ts  The matching engine (see below)
+    useDatabase.ts        Re-exports the DB context + helper hooks (useSavedRules,
+                          usePreferences, useSessions, useSessionRecovery,
+                          useAutoSaveSession, useRuleTemplates, …)
+  context/DatabaseContext.tsx   React context wrapping window.db; no-ops when it is absent
+  pages/
+    UploadScreen.tsx          Step 1 — file drop, parse, session-recovery banner
+    MappingScreen.tsx         Step 2 — rule builder, template load/save
+    ReconciliationScreen.tsx  Step 3 — run, stats tabs, duplicate banner, export
+  components/    FileDropzone, StepIndicator, StatsCards, MatchRateBadge,
+                ResultsTable, ProcessingOverlay, Toast, ErrorBoundary
+```
+
+### How matching works (`useReconciliation.ts`)
+
+1. **Duplicate scan** — build a signature→count map for each side; report any signature seen
+   more than once as a duplicate warning.
+2. **ERP index** — bucket every ERP row into a `Map<signature, TransactionRow[]>` for O(1) lookup.
+3. **Match pass** — iterate Bank rows in chunks of 200. For each row, look up its signature
+   bucket; if a row is available, `shift()` one ERP row and record the pair, otherwise the Bank
+   row is unmatched. Empty buckets are deleted.
+4. **Remainder** — any ERP rows still left in buckets are the unmatched ERP set.
+
+Overall cost is roughly O(n + m). `getRowSignature()` builds the hash key; `evaluateMatch()`
+is a direct pairwise comparator kept in `utils/reconcile.ts` for reuse and testing.
+
+### Persistence
+
+`better-sqlite3` opens `rec-app.db` in Electron's `userData` directory (WAL mode) and creates
+four tables on first run: `rules`, `sessions`, `preferences`, `history`. All access goes
+through `db:*` IPC channels; each handler returns either the result or `{ error: string }`.
+When the app runs outside Electron (e.g. `vite preview` in a browser), `window.db` is undefined
+and the database layer silently disables itself — parsing, matching, and export still work.
+
+---
 
 ## 🚀 Getting Started
 
-Ensure you have Node.js installed.
+### Prerequisites
 
-1. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+- **Node.js 18+** and npm.
+- A C/C++ toolchain for building the `better-sqlite3` native addon if a prebuilt binary is not
+  available for your platform (Windows: "Desktop development with C++" workload; macOS: Xcode
+  Command Line Tools; Linux: `build-essential` + `python3`).
 
-2. **Run in Desktop Electron Window:**
-   ```bash
-   npm run dev
-   ```
+### Install
 
-3. **Build Application:**
-   ```bash
-   npm run build
-   ```
+```bash
+npm install
+```
+
+`xlsx` is pinned to the official SheetJS CDN tarball
+(`https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`) rather than the npm registry —
+the registry copy is frozen at `0.18.5` and carries unpatched advisories. `npm install`
+therefore needs network access to `cdn.sheetjs.com`.
+
+### Run in development
+
+```bash
+npm run dev
+```
+
+Starts the Vite dev server and launches the Electron window with hot reload for the renderer,
+main, and preload processes.
+
+### Lint & test
+
+```bash
+npm run lint
+npm test          # Vitest — unit tests for the matching logic
+```
+
+### Build a distributable
+
+```bash
+npm run build
+```
+
+Runs `tsc`, builds the renderer and Electron bundles with Vite, then packages installers with
+`electron-builder` into `release/<version>/` (NSIS on Windows, DMG on macOS, AppImage on Linux).
+
+> Before shipping, update the placeholder `appId` and `productName` in
+> [`electron-builder.json5`](electron-builder.json5).
+
+---
 
 ## 📜 Example Workflow
-1. Proceed to **Upload**. Drop `Bank_Jan.xlsx` and `ERP_Jan.xlsx`.
-2. Proceed to **Mapping**. Add Rule 1: `Date` <-> `Eff Date` (Text). Add Rule 2: `Debit` <-> `Amount` (Numeric).
-3. Proceed to **Reconciliation**. The UI visually indicates duplicates, executes the chunking loops, and displays 3 split tables. Click Export when satisfied!
+
+1. **Upload** — drop `Bank_Jan.xlsx` and `ERP_Jan.xlsx`, then *Process & Extract Data*.
+2. **Mapping** — add Rule 1: `Date` MUST EQUAL `Eff Date` (Text). Add Rule 2: `Debit` MUST EQUAL
+   `Amount` (Numeric). Optionally *Save as Template*.
+3. **Reconciliation** — the engine scans for duplicates, runs the chunked match, and shows three
+   tabs (Matched / Unmatched Bank / Unmatched ERP) plus a match‑rate badge. Review the yellow
+   banner if duplicates were found, then *Export Report* or *Save Session*.
+
+---
+
+## 📁 Scripts
+
+| Script | Description |
+|--------|-------------|
+| `npm run dev` | Vite dev server + Electron window |
+| `npm run build` | Type-check, bundle, and package installers |
+| `npm run lint` | ESLint (flat config, zero warnings allowed) |
+| `npm test` | Run the Vitest suite once |
+| `npm run test:watch` | Vitest in watch mode |
+| `npm run preview` | Serve the built renderer in a browser (no Electron, no database) |
+
+---
+
+## ⚠️ Notes & Limitations
+
+- Only the **first worksheet** of each workbook is read.
+- Column names are taken from the header row of the first data row; keys starting with `__EMPTY`
+  are ignored in the mapping UI.
+- Test coverage is currently limited to the matching logic (`utils/reconcile.ts`); UI and the
+  Electron/SQLite layer are untested.
+- The renderer runs with Electron's default `webPreferences` (no `contextIsolation`/`sandbox`
+  hardening configured); review these before distributing.
+- A `docs/FEATURE-ROADMAP.md` tracks planned changes and the implementation log.

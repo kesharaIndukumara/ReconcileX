@@ -33,9 +33,9 @@ export const Toast: React.FC<ToastProps> = ({
   };
 
   const bgColors = {
-    success: 'bg-green-50 border-green-200',
-    error: 'bg-red-50 border-red-200',
-    info: 'bg-blue-50 border-blue-200'
+    success: 'bg-green-50 border-green-200 dark:bg-green-900/30 dark:border-green-800',
+    error: 'bg-red-50 border-red-200 dark:bg-red-900/30 dark:border-red-800',
+    info: 'bg-blue-50 border-blue-200 dark:bg-blue-900/30 dark:border-blue-800'
   };
 
   return (
@@ -50,12 +50,12 @@ export const Toast: React.FC<ToastProps> = ({
           <div className="mr-3">
             {icons[type]}
           </div>
-          <div className="text-sm font-medium text-slate-800 pr-6">
+          <div className="text-sm font-medium text-slate-800 dark:text-slate-100 pr-6">
             {message}
           </div>
-          <button 
+          <button
             onClick={onClose}
-            className="absolute top-4 right-3 text-slate-400 hover:text-slate-600 transition-colors"
+            className="absolute top-4 right-3 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>

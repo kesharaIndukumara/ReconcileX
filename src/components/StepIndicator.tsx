@@ -1,4 +1,5 @@
 import React from 'react';
+import { ThemeToggle } from './ThemeToggle';
 
 interface StepIndicatorProps {
   currentStep: 1 | 2 | 3;
@@ -12,13 +13,13 @@ export const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep }) => 
   ];
 
   return (
-    <div className="w-full flex justify-center py-6 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800">
+    <div className="relative w-full flex justify-center py-6 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800">
       <div className="flex items-center space-x-4 max-w-xl w-full px-4">
         {steps.map((step, index) => (
           <React.Fragment key={step.num}>
             <div className={`flex flex-col items-center flex-1 ${currentStep >= step.num ? 'opacity-100' : 'opacity-40'}`}>
                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition-colors duration-300
-                 ${currentStep === step.num ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]' : 
+                 ${currentStep === step.num ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]' :
                    currentStep > step.num ? 'bg-green-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}
                `}>
                  {currentStep > step.num ? '✓' : step.num}
@@ -33,6 +34,7 @@ export const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep }) => 
           </React.Fragment>
         ))}
       </div>
+      <ThemeToggle className="absolute right-4 top-1/2 -translate-y-1/2" />
     </div>
   );
 };

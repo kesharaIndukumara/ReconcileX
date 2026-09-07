@@ -6,8 +6,8 @@ export const useReconciliation = (state: ReconciliationState | null) => {
   const [isProcessing, setIsProcessing] = useState(true);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [duplicateWarnings, setDuplicateWarnings] = useState<{ type: 'bank' | 'erp', count: number }[]>([]);
-  const [results, setResults] = useState<ReconciliationResults>({ 
-    matched: [], unmatchedBank: [], unmatchedERP: [], progress: 0 
+  const [results, setResults] = useState<ReconciliationResults>({
+    matched: [], unmatchedBank: [], unmatchedERP: [], progress: 0, bankMatchRate: 0, erpMatchRate: 0,
   });
 
   useEffect(() => {
@@ -42,9 +42,13 @@ export const useReconciliation = (state: ReconciliationState | null) => {
     setDuplicateWarnings(warnings);
 
     const totalRecords = bankItems.length;
-    
+    const erpTotalRecords = erpItems.length;
+
     if (totalRecords === 0) {
-       setResults({ matched: [], unmatchedBank: [], unmatchedERP: erpItems, progress: 0 });
+       setResults({
+         matched: [], unmatchedBank: [], unmatchedERP: erpItems,
+         progress: 0, bankMatchRate: 0, erpMatchRate: 0,
+       });
        setIsProcessing(false);
        return;
     }
@@ -109,12 +113,17 @@ export const useReconciliation = (state: ReconciliationState | null) => {
             unmatchedERPItems.push(...bucket);
           }
 
-          const finalMatchProgress = Math.round((matchedItems.length / totalRecords) * 100);
+          const matchedCount = matchedItems.length;
+          const combinedTotal = totalRecords + erpTotalRecords;
           setResults({
             matched: matchedItems,
             unmatchedBank: unmatchedBankItems,
             unmatchedERP: unmatchedERPItems,
-            progress: finalMatchProgress
+            // Combined rate counts each match once against both sides, so an ERP-heavy
+            // file can no longer read as "100%" while ERP rows go unmatched.
+            progress: combinedTotal > 0 ? Math.round((matchedCount * 2 * 100) / combinedTotal) : 0,
+            bankMatchRate: Math.round((matchedCount / totalRecords) * 100),
+            erpMatchRate: erpTotalRecords > 0 ? Math.round((matchedCount / erpTotalRecords) * 100) : 0,
           });
           setIsProcessing(false);
         }, 500);
