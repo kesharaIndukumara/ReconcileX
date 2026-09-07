@@ -1,6 +1,7 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 
 import { fileURLToPath } from 'node:url'
+import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import * as db from './db'
 import type { MappingRule, ReconciliationSession, HistoryEvent } from '../src/types'
@@ -278,6 +279,22 @@ ipcMain.handle('db:resetDatabase', () => {
     return { success: true }
   } catch (error) {
     return { error: (error as Error).message }
+  }
+})
+
+// ============ IPC: FILE EXPORT ============
+
+ipcMain.handle('export:save', async (_event, args: { defaultName: string; base64: string; ext: string }) => {
+  try {
+    const { canceled, filePath } = await dialog.showSaveDialog(win ?? undefined as unknown as BrowserWindow, {
+      defaultPath: args.defaultName,
+      filters: [{ name: args.ext.toUpperCase(), extensions: [args.ext] }],
+    })
+    if (canceled || !filePath) return { saved: false }
+    await writeFile(filePath, Buffer.from(args.base64, 'base64'))
+    return { saved: true, path: filePath }
+  } catch (error) {
+    return { saved: false, error: (error as Error).message }
   }
 })
 

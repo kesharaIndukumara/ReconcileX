@@ -38,13 +38,21 @@ export interface ReconciliationState {
   erpFileName?: string;
 }
 
-export type MatchKind = 'exact' | 'fuzzy' | 'manual';
+export type MatchKind = 'exact' | 'fuzzy' | 'manual' | 'group';
 
 export interface MatchedPair {
   bank: TransactionRow;
   erp: TransactionRow;
   /** How the pair was formed. Absent on rows loaded from pre-v0.3 sessions (treat as 'exact'). */
   kind?: MatchKind;
+}
+
+/** One row on one side reconciled against several rows on the other (split payment / batch). */
+export interface GroupMatch {
+  anchorSide: 'bank' | 'erp';
+  anchor: TransactionRow;
+  /** Rows on the opposite side whose primary numeric value sums to the anchor's. */
+  group: TransactionRow[];
 }
 
 export interface ReconciliationResults {
@@ -61,24 +69,8 @@ export interface ReconciliationResults {
   fuzzyCount: number;
   /** True when the fuzzy pass was skipped because the leftover set was too large. */
   fuzzySkipped: boolean;
-}
-
-/** How to treat rows that share a mapping signature within one side. */
-export type DuplicateStrategy = 'first-wins' | 'all-unmatched';
-
-/** A set of rows on one side that share the same mapping signature. */
-export interface DuplicateGroup {
-  side: 'bank' | 'erp';
-  /** Human-readable rendering of the shared key values. */
-  label: string;
-  rows: TransactionRow[];
-}
-
-export interface DuplicateSummary {
-  /** Number of signatures that occur more than once. */
-  groups: number;
-  /** Rows beyond the first in each group (the "extra copies"). */
-  extras: number;
+  /** One-to-many reconciliations found by the third pass. */
+  groupMatched: GroupMatch[];
 }
 
 /** How to treat rows that share a mapping signature within one side. */

@@ -23,6 +23,7 @@ const toResults = (s: ReconciliationSession): ReconciliationResults => {
     erpMatchRate: rate(matched.length, erpTotal),
     fuzzyCount: matched.filter(m => m.kind === 'fuzzy').length,
     fuzzySkipped: false,
+    groupMatched: [],
   };
 };
 

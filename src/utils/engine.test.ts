@@ -65,3 +65,35 @@ describe('runReconciliation — fuzzy pass', () => {
     expect(out.fuzzyCount).toBe(1)
   })
 })
+
+describe('runReconciliation — one-to-many (pass 3)', () => {
+  it('matches one bank row against several ERP rows that sum to it', () => {
+    const bank: TransactionRow[] = [{ Amount: '300', Ref: 'BATCH' }]
+    const erp: TransactionRow[] = [
+      { Amount: '100', Ref: 'BATCH' },
+      { Amount: '200', Ref: 'BATCH' },
+      { Amount: '77', Ref: 'BATCH' },
+    ]
+    const rules: MappingRule[] = [
+      rule({ bankColumn: 'Amount', erpColumn: 'Amount' }),
+      rule({ bankColumn: 'Ref', erpColumn: 'Ref', comparisonMode: 'text' }),
+    ]
+    const out = runReconciliation({ bankData: bank, erpData: erp, rules, duplicateStrategy: 'first-wins' })
+    expect(out.groupMatched).toHaveLength(1)
+    expect(out.groupMatched[0].anchorSide).toBe('bank')
+    expect(out.groupMatched[0].group).toHaveLength(2)
+    expect(out.unmatchedERP).toHaveLength(1) // the 77
+    expect(out.unmatchedBank).toHaveLength(0)
+  })
+
+  it('does not group when a non-numeric rule disagrees', () => {
+    const bank: TransactionRow[] = [{ Amount: '300', Ref: 'A' }]
+    const erp: TransactionRow[] = [{ Amount: '100', Ref: 'B' }, { Amount: '200', Ref: 'B' }]
+    const rules: MappingRule[] = [
+      rule({ bankColumn: 'Amount', erpColumn: 'Amount' }),
+      rule({ bankColumn: 'Ref', erpColumn: 'Ref', comparisonMode: 'text' }),
+    ]
+    const out = runReconciliation({ bankData: bank, erpData: erp, rules, duplicateStrategy: 'first-wins' })
+    expect(out.groupMatched).toHaveLength(0)
+  })
+})

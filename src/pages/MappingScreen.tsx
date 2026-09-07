@@ -107,6 +107,16 @@ export const MappingScreen = () => {
     }
   }, [templatesLoading, templates, rules, getLastUsedTemplate]);
 
+  // Esc closes whichever modal is open.
+  useEffect(() => {
+    if (!showSaveModal && !showManager) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setShowSaveModal(false); setShowManager(false); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showSaveModal, showManager]);
+
   const addRule = () => setRules(prev => [...prev, newRule()]);
   const removeRule = (id: string) => setRules(prev => prev.filter(r => r.id !== id));
   const updateRule = (id: string, field: keyof MappingRule, value: string) =>
