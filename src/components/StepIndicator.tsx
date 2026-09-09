@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Clock, Settings } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
+import { HelpModeToggle, HelpModeBanner } from './HelpModeToggle';
 
 interface StepIndicatorProps {
   currentStep: 1 | 2 | 3;
@@ -16,6 +17,7 @@ export const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep }) => 
   ];
 
   return (
+   <>
     <div className="relative w-full flex justify-center py-6 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800">
       <div className="flex items-center space-x-4 max-w-xl w-full px-4">
         {steps.map((step, index) => (
@@ -39,6 +41,7 @@ export const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep }) => 
       </div>
 
       <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1">
+        <HelpModeToggle />
         <button
           type="button"
           onClick={() => navigate('/history')}
@@ -60,5 +63,7 @@ export const StepIndicator: React.FC<StepIndicatorProps> = ({ currentStep }) => 
         <ThemeToggle />
       </div>
     </div>
+    <HelpModeBanner />
+   </>
   );
 };
