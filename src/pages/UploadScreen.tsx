@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { FileDropzone } from '../components/FileDropzone';
 import { Toast } from '../components/Toast';
 import { StepIndicator } from '../components/StepIndicator';
+import { HelpHotspot } from '../components/HelpHotspot';
 import { useFileParser } from '../hooks/useFileParser';
 import { useSessionRecovery } from '../hooks/useDatabase';
 import { motion } from 'framer-motion';
@@ -181,20 +182,25 @@ export const UploadScreen = () => {
           </div>
 
           {!parsedData && (bankFile || erpFile) && (
-            <div className="mt-6 flex items-center justify-center gap-3 text-sm text-slate-600 dark:text-slate-400">
-              <SlidersHorizontal className="w-4 h-4" />
-              <label htmlFor="headerRow">Header is on row</label>
-              <input
-                id="headerRow"
-                type="number"
-                min={1}
-                max={50}
-                value={headerRow}
-                onChange={e => setHeaderRow(Math.max(1, Number(e.target.value) || 1))}
-                className="w-16 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1"
-              />
-              <span className="text-slate-400">(rows above are skipped)</span>
-            </div>
+            <HelpHotspot
+              label="Header is on row"
+              tip="Which row in the sheet holds your column names (Date, Amount, Reference…). Bank and ERP exports often start with a title or blank lines; set this to the real heading row and everything above it is ignored. Both files use the same number. If the column pickers on the next screen show junk names, this is set wrong."
+            >
+              <div className="mt-6 flex items-center justify-center gap-3 text-sm text-slate-600 dark:text-slate-400">
+                <SlidersHorizontal className="w-4 h-4" />
+                <label htmlFor="headerRow">Header is on row</label>
+                <input
+                  id="headerRow"
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={headerRow}
+                  onChange={e => setHeaderRow(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-16 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1"
+                />
+                <span className="text-slate-400">(rows above are skipped)</span>
+              </div>
+            </HelpHotspot>
           )}
 
           <div className="mt-10 flex flex-col items-center border-t border-slate-100 dark:border-slate-700 pt-8">

@@ -7,20 +7,23 @@ import { SettingsScreen } from "./pages/SettingsScreen";
 
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DatabaseProvider } from "./context/DatabaseContext";
+import { HelpModeProvider } from "./context/HelpModeContext";
 
 const App = () => {
   return (
     <ErrorBoundary>
       <DatabaseProvider>
-        <MemoryRouter>
-          <Routes>
-            <Route path="/" element={<UploadScreen />} />
-            <Route path="/mapping" element={<MappingScreen />} />
-            <Route path="/reconciliation" element={<ReconciliationScreen />} />
-            <Route path="/history" element={<HistoryScreen />} />
-            <Route path="/settings" element={<SettingsScreen />} />
-          </Routes>
-        </MemoryRouter>
+        <HelpModeProvider>
+          <MemoryRouter>
+            <Routes>
+              <Route path="/" element={<UploadScreen />} />
+              <Route path="/mapping" element={<MappingScreen />} />
+              <Route path="/reconciliation" element={<ReconciliationScreen />} />
+              <Route path="/history" element={<HistoryScreen />} />
+              <Route path="/settings" element={<SettingsScreen />} />
+            </Routes>
+          </MemoryRouter>
+        </HelpModeProvider>
       </DatabaseProvider>
     </ErrorBoundary>
   );

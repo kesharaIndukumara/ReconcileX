@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Settings2, Plus, Trash2, Save, FolderCog, Pencil, Copy, AlertTriangle, Wand2, Table } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Settings2, Plus, Trash2, Save, FolderCog, Pencil, Copy, AlertTriangle, Wand2, Table, RotateCcw, Lightbulb, X } from 'lucide-react';
 
 import { ParsedDataState, MappingRule, RuleTolerance, ComparisonMode, TransactionRow } from '../types';
 import { StepIndicator } from '../components/StepIndicator';
 import { InfoTip } from '../components/InfoTip';
-import { useRuleTemplates } from '../hooks/useDatabase';
+import { HelpHotspot } from '../components/HelpHotspot';
+import { useRuleTemplates, usePreferences } from '../hooks/useDatabase';
 import { suggestMappings } from '../utils/mapping';
 import { Toast } from '../components/Toast';
 
@@ -68,6 +69,14 @@ export const MappingScreen = () => {
     getLastUsedTemplate, setLastUsedTemplate,
   } = useRuleTemplates();
 
+  const { getPreference, setPreference } = usePreferences();
+  const [introDismissed, setIntroDismissed] = useState(false);
+  const showIntro = !getPreference<boolean>('mappingIntroSeen', false) && !introDismissed;
+  const dismissIntro = () => {
+    setIntroDismissed(true);
+    void setPreference('mappingIntroSeen', true);
+  };
+
   const [bankColumns, setBankColumns] = useState<string[]>([]);
   const [erpColumns, setErpColumns] = useState<string[]>([]);
   const [rules, setRules] = useState<MappingRule[]>([
@@ -76,6 +85,9 @@ export const MappingScreen = () => {
 
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showManager, setShowManager] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  /** Saved-template ids to run as extra passes after the primary rules, in order. */
+  const [extraPassIds, setExtraPassIds] = useState<string[]>([]);
   const [templateName, setTemplateName] = useState('');
   const [templateDescription, setTemplateDescription] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -110,16 +122,23 @@ export const MappingScreen = () => {
 
   // Esc closes whichever modal is open.
   useEffect(() => {
-    if (!showSaveModal && !showManager) return;
+    if (!showSaveModal && !showManager && !showResetConfirm) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setShowSaveModal(false); setShowManager(false); }
+      if (e.key === 'Escape') { setShowSaveModal(false); setShowManager(false); setShowResetConfirm(false); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [showSaveModal, showManager]);
+  }, [showSaveModal, showManager, showResetConfirm]);
 
   const addRule = () => setRules(prev => [...prev, newRule()]);
   const removeRule = (id: string) => setRules(prev => prev.filter(r => r.id !== id));
+
+  const confirmResetRules = () => {
+    autoLoadedRef.current = true; // stop the auto-load effect from repopulating the list
+    setRules([newRule()]);
+    setShowResetConfirm(false);
+    setToast({ show: true, msg: 'Rules cleared.', type: 'success' });
+  };
   const updateRule = (id: string, field: keyof MappingRule, value: string) =>
     setRules(prev => prev.map(r => {
       if (r.id !== id) return r;
@@ -158,6 +177,7 @@ export const MappingScreen = () => {
 
   // ---- validation --------------------------------------------------------
   const validRules = useMemo(() => rules.filter(r => r.bankColumn && r.erpColumn), [rules]);
+  const rulesArePristine = rules.length === 1 && !rules[0].bankColumn && !rules[0].erpColumn;
   const ruleIssues = useMemo(() => {
     const issues: string[] = [];
     if (rules.some(r => (r.bankColumn && !r.erpColumn) || (!r.bankColumn && r.erpColumn))) {
@@ -232,7 +252,19 @@ export const MappingScreen = () => {
       setToast({ show: true, msg: 'Map at least one pair of columns before continuing.', type: 'error' });
       return;
     }
-    navigate('/reconciliation', { state: { parsedData, rules: validRules, bankFileName, erpFileName } });
+    const extraPasses = extraPassIds
+      .map(id => templates.find(t => t.id === id))
+      .filter((t): t is NonNullable<typeof t> => !!t && t.rules.length > 0)
+      .map(t => ({ name: t.name, rules: t.rules }));
+    navigate('/reconciliation', {
+      state: {
+        parsedData,
+        rules: validRules,
+        bankFileName,
+        erpFileName,
+        ...(extraPasses.length > 0 ? { extraPasses } : {}),
+      },
+    });
   };
 
   if (!parsedData) return null;
@@ -270,6 +302,37 @@ export const MappingScreen = () => {
 
         <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none p-8 border border-slate-100 dark:border-slate-700">
 
+          {showIntro && (
+            <div className="mb-8 rounded-2xl border border-amber-200 dark:border-amber-800/70 bg-amber-50 dark:bg-amber-900/15 p-5">
+              <div className="flex items-start gap-3">
+                <Lightbulb className="w-5 h-5 mt-0.5 text-amber-500 shrink-0" />
+                <div className="flex-1 text-sm text-amber-900 dark:text-amber-100">
+                  <p className="font-semibold mb-1">New here? How matching rules work</p>
+                  <ul className="list-disc list-inside space-y-0.5 text-amber-800 dark:text-amber-200/90">
+                    <li>Each row links <strong>one Bank column</strong> to <strong>one ERP column</strong>.</li>
+                    <li><strong>Compare As</strong> sets how values are read — text, number, or date.</li>
+                    <li><strong>Tolerance</strong> lets close-but-not-identical values still match.</li>
+                    <li>Two rows match only when <strong>every</strong> rule agrees.</li>
+                  </ul>
+                  <p className="mt-2 text-amber-800 dark:text-amber-200/90">
+                    Tip: turn on the <strong>?</strong> button in the top bar, then click any control to see what it does.
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={dismissIntro}
+                      className="rounded-full bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium px-4 py-1.5 transition-colors"
+                    >
+                      Got it
+                    </button>
+                  </div>
+                </div>
+                <button onClick={dismissIntro} aria-label="Dismiss" className="text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {templates.length > 0 && (
             <div className="mb-8 pb-8 border-b border-slate-200 dark:border-slate-700">
               <div className="flex items-center justify-between mb-3">
@@ -281,16 +344,21 @@ export const MappingScreen = () => {
                   <FolderCog className="w-4 h-4 mr-1" /> Manage
                 </button>
               </div>
-              <select
-                onChange={(e) => { if (e.target.value) { loadTemplate(e.target.value); e.target.value = ''; } }}
-                className="w-full bg-white dark:bg-slate-900 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl px-4 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900"
-                disabled={templatesLoading}
+              <HelpHotspot
+                label="Load Saved Template"
+                tip="Pick a set of rules you saved earlier. Choosing one replaces the rows below. Use 'Manage' to rename, duplicate, or delete saved sets."
               >
-                <option value="">Select a template to load...</option>
-                {templates.map(t => (
-                  <option key={t.id} value={t.id}>{t.name}{t.description ? ` - ${t.description}` : ''}</option>
-                ))}
-              </select>
+                <select
+                  onChange={(e) => { if (e.target.value) { loadTemplate(e.target.value); e.target.value = ''; } }}
+                  className="w-full bg-white dark:bg-slate-900 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl px-4 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900"
+                  disabled={templatesLoading}
+                >
+                  <option value="">Select a template to load...</option>
+                  {templates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}{t.description ? ` - ${t.description}` : ''}</option>
+                  ))}
+                </select>
+              </HelpHotspot>
             </div>
           )}
 
@@ -328,12 +396,18 @@ export const MappingScreen = () => {
 
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Matching Rules</h3>
-            <button
-              onClick={handleSuggest}
-              className="flex items-center text-xs font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 bg-purple-50 dark:bg-purple-500/10 px-3 py-1.5 rounded-full transition-colors"
+            <HelpHotspot
+              placement="bottom-right"
+              label="Suggest mappings"
+              tip="Fills in rows automatically by pairing Bank and ERP columns whose names look alike (e.g. 'Txn Date' ↔ 'Date'). It's a starting point — check every row before you run."
             >
-              <Wand2 className="w-3.5 h-3.5 mr-1" /> Suggest mappings
-            </button>
+              <button
+                onClick={handleSuggest}
+                className="flex items-center text-xs font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 bg-purple-50 dark:bg-purple-500/10 px-3 py-1.5 rounded-full transition-colors"
+              >
+                <Wand2 className="w-3.5 h-3.5 mr-1" /> Suggest mappings
+              </button>
+            </HelpHotspot>
           </div>
 
           <div className="grid grid-cols-[1fr_auto_1fr_minmax(120px,auto)_auto] gap-4 mb-4 text-sm font-semibold text-slate-500 uppercase tracking-wider px-2">
@@ -385,15 +459,21 @@ export const MappingScreen = () => {
                       {erpColumns.map(col => <option key={`erp-${col}`} value={col}>{col}</option>)}
                     </select>
 
-                    <select
-                      value={rule.comparisonMode || 'text'}
-                      onChange={(e) => updateRule(rule.id, 'comparisonMode', e.target.value)}
-                      className="w-full bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900 text-sm"
+                    <HelpHotspot
+                      placement="bottom-right"
+                      label="Compare As"
+                      tip="How both cell values are read before they're compared. Text = case-insensitive words. Numeric = strips commas/spaces and compares the number. Date = parses each side to a calendar date. Pick the wrong one and values that should match won't."
                     >
-                      <option value="text">Text</option>
-                      <option value="numeric">Numeric</option>
-                      <option value="date">Date</option>
-                    </select>
+                      <select
+                        value={rule.comparisonMode || 'text'}
+                        onChange={(e) => updateRule(rule.id, 'comparisonMode', e.target.value)}
+                        className="w-full bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-3 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:focus:ring-purple-900 text-sm"
+                      >
+                        <option value="text">Text</option>
+                        <option value="numeric">Numeric</option>
+                        <option value="date">Date</option>
+                      </select>
+                    </HelpHotspot>
 
                     <button
                       onClick={() => removeRule(rule.id)}
@@ -418,13 +498,18 @@ export const MappingScreen = () => {
                     return (
                       <div className="flex items-center gap-2 pl-1 text-sm text-slate-500 dark:text-slate-400">
                         <span className="text-xs uppercase tracking-wider">Tolerance</span>
-                        <select
-                          value={kind}
-                          onChange={(e) => setTolerance(rule.id, toleranceFor(e.target.value as RuleTolerance['kind'], value))}
-                          className="bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-purple-500"
+                        <HelpHotspot
+                          label="Tolerance"
+                          tip="How close counts as equal. 'Exact' needs an identical value. The rest allow near-matches: ignore case/punctuation for text, ± an amount or % for numbers, ± N days for dates. 'Exact (blank = 0)' treats an empty cell as zero — use it for Debit/Credit columns where one side is left blank. Options with ± show a box for the size of the gap."
                         >
-                          {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                        </select>
+                          <select
+                            value={kind}
+                            onChange={(e) => setTolerance(rule.id, toleranceFor(e.target.value as RuleTolerance['kind'], value))}
+                            className="bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-purple-500"
+                          >
+                            {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                        </HelpHotspot>
                         {needsValue && (
                           <input
                             type="number"
@@ -455,21 +540,98 @@ export const MappingScreen = () => {
           )}
 
           <div className="flex flex-wrap gap-4">
-            <button
-              onClick={addRule}
-              className="flex items-center text-purple-600 dark:text-purple-400 font-medium hover:text-purple-700 transition-colors bg-purple-50 dark:bg-purple-500/10 px-5 py-3 rounded-full"
+            <HelpHotspot
+              placement="top-left"
+              label="Add Matching Condition (AND)"
+              tip="Adds another rule row. Rules are combined with AND, so every extra condition makes matching stricter — a pair of rows must satisfy all of them."
             >
-              <Plus className="w-5 h-5 mr-1" />
-              Add Matching Condition (AND)
-            </button>
-            <button
-              onClick={() => setShowSaveModal(true)}
-              className="flex items-center text-blue-600 dark:text-blue-400 font-medium hover:text-blue-700 transition-colors bg-blue-50 dark:bg-blue-500/10 px-5 py-3 rounded-full"
+              <button
+                onClick={addRule}
+                className="flex items-center text-purple-600 dark:text-purple-400 font-medium hover:text-purple-700 transition-colors bg-purple-50 dark:bg-purple-500/10 px-5 py-3 rounded-full"
+              >
+                <Plus className="w-5 h-5 mr-1" />
+                Add Matching Condition (AND)
+              </button>
+            </HelpHotspot>
+            <HelpHotspot
+              placement="top-left"
+              label="Save as Template"
+              tip="Stores the current rules under a name so you can reload them next time from 'Load Saved Template'."
             >
-              <Save className="w-5 h-5 mr-1" />
-              Save as Template
-            </button>
+              <button
+                onClick={() => setShowSaveModal(true)}
+                className="flex items-center text-blue-600 dark:text-blue-400 font-medium hover:text-blue-700 transition-colors bg-blue-50 dark:bg-blue-500/10 px-5 py-3 rounded-full"
+              >
+                <Save className="w-5 h-5 mr-1" />
+                Save as Template
+              </button>
+            </HelpHotspot>
+            {!rulesArePristine && (
+              <HelpHotspot
+                placement="top-left"
+                label="Reset rules"
+                tip="Removes every rule and leaves you with a single empty row, so you can start the mapping from scratch. Saved templates are not affected."
+              >
+                <button
+                  onClick={() => setShowResetConfirm(true)}
+                  className="flex items-center text-slate-500 dark:text-slate-400 font-medium hover:text-red-600 dark:hover:text-red-400 transition-colors bg-slate-100 dark:bg-slate-700/50 px-5 py-3 rounded-full"
+                >
+                  <RotateCcw className="w-5 h-5 mr-1" />
+                  Reset rules
+                </button>
+              </HelpHotspot>
+            )}
           </div>
+
+          {templates.length > 0 && (
+            <div className="mt-8 pt-8 border-t border-slate-200 dark:border-slate-700">
+              <HelpHotspot
+                label="Extra matching passes"
+                tip="After the rules above run, each extra pass takes the rows still unmatched and tries a saved template on them, in order. Put stricter templates first. Good for 'match on ID — otherwise match on amount + name'."
+              >
+                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  Extra Matching Passes <span className="normal-case font-normal text-slate-400">— optional</span>
+                </h3>
+              </HelpHotspot>
+              <p className="mt-1 mb-3 text-xs text-slate-500 dark:text-slate-400">
+                Each pass runs on the rows the earlier passes left unmatched. Order matters — strictest first.
+              </p>
+
+              {extraPassIds.length > 0 && (
+                <div className="space-y-2 mb-3">
+                  {extraPassIds.map((id, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="text-xs font-mono text-slate-400 w-16 shrink-0">Pass {i + 2}</span>
+                      <select
+                        value={id}
+                        onChange={(e) => setExtraPassIds(prev => prev.map((v, vi) => (vi === i ? e.target.value : v)))}
+                        className="flex-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-2 text-sm outline-none focus:border-purple-500"
+                      >
+                        <option value="">Select a template…</option>
+                        {templates.map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => setExtraPassIds(prev => prev.filter((_, vi) => vi !== i))}
+                        aria-label="Remove pass"
+                        className="p-2 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={() => setExtraPassIds(prev => [...prev, ''])}
+                className="flex items-center text-xs font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 bg-purple-50 dark:bg-purple-500/10 px-3 py-1.5 rounded-full transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1" /> Add a pass
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="mt-10 flex justify-end">
@@ -580,6 +742,41 @@ export const MappingScreen = () => {
                 className="px-5 py-2.5 rounded-xl font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
               >
                 Done
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {showResetConfirm && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onClick={() => setShowResetConfirm(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white dark:bg-slate-800 rounded-3xl p-8 w-full max-w-md shadow-2xl border border-slate-200 dark:border-slate-700"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Reset all rules?</h2>
+            <p className="text-slate-600 dark:text-slate-400 mb-6">
+              This removes every rule and leaves one empty row. Saved templates are not affected.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="flex-1 px-4 py-3 rounded-xl font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmResetRules}
+                className="flex-1 px-4 py-3 rounded-xl font-medium text-white bg-red-600 hover:bg-red-700 transition-colors"
+              >
+                Reset rules
               </button>
             </div>
           </motion.div>

@@ -1,0 +1,18 @@
+{
+  "default_branch": "dev",
+  "branches": [
+    "bugfix/fix-column-zero-rule",
+    "dev",
+    "feat/impl-rule-section"
+  ],
+  "parent": {
+    "bugfix/fix-column-zero-rule": "dev",
+    "dev": null,
+    "feat/impl-rule-section": "dev"
+  },
+  "order": [
+    "dev",
+    "bugfix/fix-column-zero-rule",
+    "feat/impl-rule-section"
+  ]
+}
